@@ -15,13 +15,13 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
         async handleActionClick (event, encodedValue) {
             const [actionTypeId, actionId] = encodedValue.split('|')
 
-            const renderable = ['item']
+            const renderable = ['skill', 'magicSkill', 'combatStyle', 'weapon', 'armor', 'item', 'ammunition', 'spell', 'talent', 'trait', 'power']
 
             if (renderable.includes(actionTypeId) && this.isRenderItem()) {
                 return this.doRenderItem(this.actor, actionId)
             }
 
-            const knownCharacters = ['character']
+            const knownCharacters = ['character', 'npc']
 
             // If single actor is selected
             if (this.actor) {
@@ -68,13 +68,531 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          */
         async #handleAction (event, actor, token, actionTypeId, actionId) {
             switch (actionTypeId) {
+            case 'attack':
+                await this.#handleAttackAction(event, actor, actionId)
+                break
+            case 'aim':
+                await this.#handleAimAction(event, actor)
+                break
+            case 'castMagic':
+                await this.#handleCastMagicAction(event, actor)
+                break
+            case 'dash':
+                await this.#handleDashAction(event, actor)
+                break
+            case 'disengage':
+                await this.#handleDisengageAction(event, actor)
+                break
+            case 'hide':
+                await this.#handleHideAction(event, actor)
+                break
+            case 'useItem':
+                await this.#handleUseItemAction(event, actor)
+                break
+            case 'defensiveStance':
+                await this.#handleDefensiveStanceAction(event, actor)
+                break
+            case 'opportunityAttack':
+                await this.#handleOpportunityAttackAction(event, actor)
+                break
+            case 'specialAction':
+                await this.#handleSpecialAction(event, actor, actionId)
+                break
+            case 'skill':
+                await this.#handleSkillAction(event, actor, actionId)
+                break
+            case 'magicSkill':
+                await this.#handleMagicSkillAction(event, actor, actionId)
+                break
+            case 'combatStyle':
+                await this.#handleCombatStyleAction(event, actor, actionId)
+                break
+            case 'weapon':
+                await this.#handleWeaponAction(event, actor, actionId)
+                break
+            case 'armor':
+                await this.#handleArmorAction(event, actor, actionId)
+                break
             case 'item':
-                this.#handleItemAction(event, actor, actionId)
+                await this.#handleItemAction(event, actor, actionId)
+                break
+            case 'ammunition':
+                await this.#handleAmmunitionAction(event, actor, actionId)
+                break
+            case 'spell':
+                await this.#handleSpellAction(event, actor, actionId)
+                break
+            case 'talent':
+            case 'trait':
+            case 'power':
+                await this.#handleFeatureAction(event, actor, actionId)
                 break
             case 'utility':
-                this.#handleUtilityAction(token, actionId)
+                await this.#handleUtilityAction(token, actionId)
                 break
             }
+        }
+
+        /**
+         * Handle attack action
+         * @private
+         * @param {object} event    The event
+         * @param {object} actor    The actor
+         * @param {string} actionId The action id (melee or ranged)
+         */
+        async #handleAttackAction (event, actor, actionId) {
+            try {
+                // Find equipped weapon of the appropriate type
+                const weaponType = actionId === 'melee' ? 'melee' : 'ranged'
+                const weapon = actor.items.find(item =>
+                    item.type === 'weapon' &&
+                    item.system?.equipped &&
+                    item.system?.weaponType === weaponType
+                )
+
+                if (!weapon) {
+                    ui.notifications.warn(`No ${weaponType} weapon equipped`)
+                    return
+                }
+
+                // Dynamically import OpposedWorkflow from system
+                const { OpposedWorkflow } = await import('/systems/uesrpg-3ev4/module/combat/opposed-workflow.js')
+
+                // Create and execute attack workflow
+                const workflow = new OpposedWorkflow(actor, weapon)
+                await workflow.execute()
+            } catch (error) {
+                console.error('Error handling attack action:', error)
+                ui.notifications.error('Failed to execute attack. See console for details.')
+            }
+        }
+
+        /**
+         * Handle aim action
+         * @private
+         * @param {object} event The event
+         * @param {object} actor The actor
+         */
+        async #handleAimAction (event, actor) {
+            try {
+                // Apply aim effect (stacking +10 bonus for ranged attacks)
+                const existingAim = actor.effects.find(e => e.flags?.core?.statusId === 'aim')
+                const currentBonus = existingAim?.changes?.[0]?.value || 0
+                const newBonus = parseInt(currentBonus) + 10
+
+                if (existingAim) {
+                    await existingAim.delete()
+                }
+
+                await actor.createEmbeddedDocuments('ActiveEffect', [{
+                    name: 'Aiming',
+                    icon: 'icons/svg/target.svg',
+                    flags: { core: { statusId: 'aim' } },
+                    changes: [{
+                        key: 'system.rangedAttackBonus',
+                        mode: 2,
+                        value: newBonus
+                    }]
+                }])
+
+                ui.notifications.info(`Aim bonus: +${newBonus}`)
+            } catch (error) {
+                console.error('Error handling aim action:', error)
+                ui.notifications.error('Failed to apply aim effect')
+            }
+        }
+
+        /**
+         * Handle cast magic action
+         * @private
+         * @param {object} event The event
+         * @param {object} actor The actor
+         */
+        async #handleCastMagicAction (event, actor) {
+            try {
+                // Get all spells from actor
+                const spells = actor.items.filter(item => item.type === 'spell')
+
+                if (spells.length === 0) {
+                    ui.notifications.warn('No spells available')
+                    return
+                }
+
+                // Create spell selection dialog
+                const spellList = spells.map(spell =>
+                    `<option value="${spell.id}">${spell.name} (MP ${spell.system?.mpCost || 0})</option>`
+                ).join('')
+
+                const content = `
+                    <form>
+                        <div class="form-group">
+                            <label>Select Spell:</label>
+                            <select id="spell-select" style="width: 100%;">
+                                ${spellList}
+                            </select>
+                        </div>
+                    </form>
+                `
+
+                new Dialog({
+                    title: 'Cast Magic',
+                    content,
+                    buttons: {
+                        cast: {
+                            label: 'Cast',
+                            callback: async (html) => {
+                                const spellId = html.find('#spell-select').val()
+                                await this.#handleSpellAction(event, actor, spellId)
+                            }
+                        },
+                        cancel: {
+                            label: 'Cancel'
+                        }
+                    },
+                    default: 'cast'
+                }).render(true)
+            } catch (error) {
+                console.error('Error handling cast magic action:', error)
+                ui.notifications.error('Failed to open spell selection')
+            }
+        }
+
+        /**
+         * Handle dash action
+         * @private
+         * @param {object} event The event
+         * @param {object} actor The actor
+         */
+        async #handleDashAction (event, actor) {
+            // Post dash action to chat
+            ChatMessage.create({
+                speaker: ChatMessage.getSpeaker({ actor }),
+                content: `<strong>${actor.name}</strong> uses <strong>Dash</strong> to move quickly!`
+            })
+        }
+
+        /**
+         * Handle disengage action
+         * @private
+         * @param {object} event The event
+         * @param {object} actor The actor
+         */
+        async #handleDisengageAction (event, actor) {
+            try {
+                // Apply disengage effect
+                await actor.createEmbeddedDocuments('ActiveEffect', [{
+                    name: 'Disengaged',
+                    icon: 'icons/svg/cancel.svg',
+                    flags: { core: { statusId: 'disengaged' } },
+                    duration: { turns: 1 }
+                }])
+
+                ChatMessage.create({
+                    speaker: ChatMessage.getSpeaker({ actor }),
+                    content: `<strong>${actor.name}</strong> uses <strong>Disengage</strong> to retreat safely!`
+                })
+            } catch (error) {
+                console.error('Error handling disengage action:', error)
+            }
+        }
+
+        /**
+         * Handle hide action
+         * @private
+         * @param {object} event The event
+         * @param {object} actor The actor
+         */
+        async #handleHideAction (event, actor) {
+            try {
+                // Find stealth/sneak skill
+                const stealthSkill = actor.items.find(item =>
+                    item.type === 'skill' &&
+                    (item.name.toLowerCase().includes('stealth') || item.name.toLowerCase().includes('sneak'))
+                )
+
+                if (stealthSkill) {
+                    await this.#handleSkillAction(event, actor, stealthSkill.id)
+                } else {
+                    ChatMessage.create({
+                        speaker: ChatMessage.getSpeaker({ actor }),
+                        content: `<strong>${actor.name}</strong> attempts to <strong>Hide</strong>!`
+                    })
+                }
+            } catch (error) {
+                console.error('Error handling hide action:', error)
+            }
+        }
+
+        /**
+         * Handle use item action
+         * @private
+         * @param {object} event The event
+         * @param {object} actor The actor
+         */
+        async #handleUseItemAction (event, actor) {
+            // Get consumable items
+            const consumables = actor.items.filter(item =>
+                item.type === 'item' &&
+                item.system?.consumable
+            )
+
+            if (consumables.length === 0) {
+                ui.notifications.warn('No consumable items available')
+                return
+            }
+
+            // Create item selection dialog
+            const itemList = consumables.map(item =>
+                `<option value="${item.id}">${item.name}</option>`
+            ).join('')
+
+            const content = `
+                <form>
+                    <div class="form-group">
+                        <label>Select Item:</label>
+                        <select id="item-select" style="width: 100%;">
+                            ${itemList}
+                        </select>
+                    </div>
+                </form>
+            `
+
+            new Dialog({
+                title: 'Use Item',
+                content,
+                buttons: {
+                    use: {
+                        label: 'Use',
+                        callback: async (html) => {
+                            const itemId = html.find('#item-select').val()
+                            await this.#handleItemAction(event, actor, itemId)
+                        }
+                    },
+                    cancel: {
+                        label: 'Cancel'
+                    }
+                },
+                default: 'use'
+            }).render(true)
+        }
+
+        /**
+         * Handle defensive stance action
+         * @private
+         * @param {object} event The event
+         * @param {object} actor The actor
+         */
+        async #handleDefensiveStanceAction (event, actor) {
+            try {
+                // Apply defensive stance effect (+10 defensive tests, attack limit 0)
+                await actor.createEmbeddedDocuments('ActiveEffect', [{
+                    name: 'Defensive Stance',
+                    icon: 'icons/svg/shield.svg',
+                    flags: { core: { statusId: 'defensive-stance' } },
+                    changes: [
+                        {
+                            key: 'system.defensiveBonus',
+                            mode: 2,
+                            value: 10
+                        },
+                        {
+                            key: 'system.attacksThisRound.max',
+                            mode: 5,
+                            value: 0
+                        }
+                    ],
+                    duration: { turns: 1 }
+                }])
+
+                ChatMessage.create({
+                    speaker: ChatMessage.getSpeaker({ actor }),
+                    content: `<strong>${actor.name}</strong> takes a <strong>Defensive Stance</strong> (+10 to defensive tests, cannot attack)!`
+                })
+            } catch (error) {
+                console.error('Error handling defensive stance action:', error)
+            }
+        }
+
+        /**
+         * Handle opportunity attack action
+         * @private
+         * @param {object} event The event
+         * @param {object} actor The actor
+         */
+        async #handleOpportunityAttackAction (event, actor) {
+            try {
+                // Find equipped melee weapon
+                const meleeWeapon = actor.items.find(item =>
+                    item.type === 'weapon' &&
+                    item.system?.equipped &&
+                    item.system?.weaponType === 'melee'
+                )
+
+                if (!meleeWeapon) {
+                    ui.notifications.warn('No melee weapon equipped for opportunity attack')
+                    return
+                }
+
+                // Execute opportunity attack
+                await this.#handleAttackAction(event, actor, 'melee')
+            } catch (error) {
+                console.error('Error handling opportunity attack action:', error)
+            }
+        }
+
+        /**
+         * Handle special action
+         * @private
+         * @param {object} event    The event
+         * @param {object} actor    The actor
+         * @param {string} actionId The action id
+         */
+        async #handleSpecialAction (event, actor, actionId) {
+            try {
+                // Dynamically import SkillOpposedWorkflow from system
+                const { SkillOpposedWorkflow } = await import('/systems/uesrpg-3ev4/module/skills/opposed-workflow.js')
+
+                // Create and execute special action workflow
+                const workflow = new SkillOpposedWorkflow(actor, actionId)
+                await workflow.execute()
+            } catch (error) {
+                console.error('Error handling special action:', error)
+                // Fallback to chat message
+                ChatMessage.create({
+                    speaker: ChatMessage.getSpeaker({ actor }),
+                    content: `<strong>${actor.name}</strong> performs <strong>${actionId}</strong>!`
+                })
+            }
+        }
+
+        /**
+         * Handle skill action
+         * @private
+         * @param {object} event    The event
+         * @param {object} actor    The actor
+         * @param {string} actionId The action id
+         */
+        async #handleSkillAction (event, actor, actionId) {
+            const skill = actor.items.get(actionId)
+            if (!skill) return
+
+            try {
+                // Check if skill has a roll method
+                if (typeof skill.roll === 'function') {
+                    await skill.roll()
+                } else {
+                    // Fallback to posting to chat
+                    skill.toChat(event)
+                }
+            } catch (error) {
+                console.error('Error rolling skill:', error)
+                skill.toChat(event)
+            }
+        }
+
+        /**
+         * Handle magic skill action
+         * @private
+         * @param {object} event    The event
+         * @param {object} actor    The actor
+         * @param {string} actionId The action id
+         */
+        async #handleMagicSkillAction (event, actor, actionId) {
+            const skill = actor.items.get(actionId)
+            if (!skill) return
+
+            // Right-click or render: open sheet
+            if (this.isRenderItem()) {
+                return skill.sheet.render(true)
+            }
+
+            // Left-click: open sheet (magic skills don't roll directly)
+            skill.sheet.render(true)
+        }
+
+        /**
+         * Handle combat style action
+         * @private
+         * @param {object} event    The event
+         * @param {object} actor    The actor
+         * @param {string} actionId The action id
+         */
+        async #handleCombatStyleAction (event, actor, actionId) {
+            const combatStyle = actor.items.get(actionId)
+            if (!combatStyle) return
+
+            // Right-click: open sheet
+            if (this.isRenderItem()) {
+                return combatStyle.sheet.render(true)
+            }
+
+            // Left-click: set as active combat style
+            try {
+                // Deactivate all other combat styles
+                const updates = actor.items
+                    .filter(item => item.type === 'combatStyle' && item.id !== actionId)
+                    .map(item => ({ _id: item.id, 'system.active': false }))
+
+                if (updates.length > 0) {
+                    await actor.updateEmbeddedDocuments('Item', updates)
+                }
+
+                // Activate this combat style
+                await combatStyle.update({ 'system.active': true })
+
+                ui.notifications.info(`${combatStyle.name} is now the active combat style`)
+            } catch (error) {
+                console.error('Error setting active combat style:', error)
+            }
+        }
+
+        /**
+         * Handle weapon action
+         * @private
+         * @param {object} event    The event
+         * @param {object} actor    The actor
+         * @param {string} actionId The action id
+         */
+        async #handleWeaponAction (event, actor, actionId) {
+            const weapon = actor.items.get(actionId)
+            if (!weapon) return
+
+            // Right-click: open sheet
+            if (this.isRenderItem()) {
+                return weapon.sheet.render(true)
+            }
+
+            // Left-click: roll damage
+            try {
+                // Check if weapon has a rollDamage method
+                if (typeof weapon.rollDamage === 'function') {
+                    await weapon.rollDamage()
+                } else {
+                    // Fallback to posting to chat
+                    weapon.toChat(event)
+                }
+            } catch (error) {
+                console.error('Error rolling weapon damage:', error)
+                weapon.toChat(event)
+            }
+        }
+
+        /**
+         * Handle armor action
+         * @private
+         * @param {object} event    The event
+         * @param {object} actor    The actor
+         * @param {string} actionId The action id
+         */
+        async #handleArmorAction (event, actor, actionId) {
+            const armor = actor.items.get(actionId)
+            if (!armor) return
+
+            // Toggle equipped status
+            const equipped = armor.system?.equipped || false
+            await armor.update({ 'system.equipped': !equipped })
+
+            ui.notifications.info(`${armor.name} ${!equipped ? 'equipped' : 'unequipped'}`)
         }
 
         /**
@@ -84,9 +602,67 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {object} actor    The actor
          * @param {string} actionId The action id
          */
-        #handleItemAction (event, actor, actionId) {
+        async #handleItemAction (event, actor, actionId) {
             const item = actor.items.get(actionId)
+            if (!item) return
+
+            // Post to chat
             item.toChat(event)
+        }
+
+        /**
+         * Handle ammunition action
+         * @private
+         * @param {object} event    The event
+         * @param {object} actor    The actor
+         * @param {string} actionId The action id
+         */
+        async #handleAmmunitionAction (event, actor, actionId) {
+            const ammo = actor.items.get(actionId)
+            if (!ammo) return
+
+            // Open sheet
+            ammo.sheet.render(true)
+        }
+
+        /**
+         * Handle spell action
+         * @private
+         * @param {object} event    The event
+         * @param {object} actor    The actor
+         * @param {string} actionId The action id
+         */
+        async #handleSpellAction (event, actor, actionId) {
+            const spell = actor.items.get(actionId)
+            if (!spell) return
+
+            try {
+                // Dynamically import MagicOpposedWorkflow from system
+                const { MagicOpposedWorkflow } = await import('/systems/uesrpg-3ev4/module/magic/opposed-workflow.js')
+
+                // Create and execute spell casting workflow
+                const workflow = new MagicOpposedWorkflow(actor, spell)
+                await workflow.execute()
+            } catch (error) {
+                console.error('Error casting spell:', error)
+                // Fallback to opening spell sheet
+                spell.sheet.render(true)
+            }
+        }
+
+        /**
+         * Handle feature action (talents, traits, powers)
+         * @private
+         * @param {object} event    The event
+         * @param {object} actor    The actor
+         * @param {string} actionId The action id
+         */
+        async #handleFeatureAction (event, actor, actionId) {
+            const feature = actor.items.get(actionId)
+            if (!feature) return
+
+            // Post to chat
+            feature.toChat(event)
         }
 
         /**

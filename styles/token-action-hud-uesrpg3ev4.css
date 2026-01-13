@@ -482,3 +482,73 @@
 .tah-subtitle > .tah-icon > :is(.fa, .fas) {
     text-shadow: var(--tah-text-shadow);
 }
+
+/* UESRPG 3ev4 Specific Styles */
+
+/* Spell School Colors */
+.tah-style-uesrpg3ev4 [data-group-id="alterationSpells"] .tah-subtitle {
+    color: #4a9eff;
+}
+
+.tah-style-uesrpg3ev4 [data-group-id="conjurationSpells"] .tah-subtitle {
+    color: #9b59d0;
+}
+
+.tah-style-uesrpg3ev4 [data-group-id="destructionSpells"] .tah-subtitle {
+    color: #ff4444;
+}
+
+.tah-style-uesrpg3ev4 [data-group-id="illusionSpells"] .tah-subtitle {
+    color: #ff8fc7;
+}
+
+.tah-style-uesrpg3ev4 [data-group-id="mysticismSpells"] .tah-subtitle {
+    color: #00d4ff;
+}
+
+.tah-style-uesrpg3ev4 [data-group-id="restorationSpells"] .tah-subtitle {
+    color: #44ff44;
+}
+
+.tah-style-uesrpg3ev4 [data-group-id="otherSpells"] .tah-subtitle {
+    color: #888888;
+}
+
+/* Combat Action Group Colors */
+.tah-style-uesrpg3ev4 [data-group-id="primaryActions"] .tah-subtitle {
+    color: #ff6b6b;
+}
+
+.tah-style-uesrpg3ev4 [data-group-id="secondaryActions"] .tah-subtitle {
+    color: #ffd93d;
+}
+
+.tah-style-uesrpg3ev4 [data-group-id="reactions"] .tah-subtitle {
+    color: #6bcf7f;
+}
+
+.tah-style-uesrpg3ev4 [data-group-id="specialActions"] .tah-subtitle {
+    color: #9b8dff;
+}
+
+/* Resource Warning Styles */
+.tah-style-uesrpg3ev4 .tah-info1.tah-spotlight {
+    color: #ff6b6b;
+    font-weight: bold;
+}
+
+/* Active Combat Style Highlight */
+.tah-style-uesrpg3ev4 .tah-action-button.active {
+    background: #2a5a2abf;
+    box-shadow: 0 0 0 1px #44ff44, inset 0 0 10px #44ff4480;
+}
+
+/* Action Tracking Display */
+.tah-style-uesrpg3ev4 [data-group-id="actionTracking"] .tah-action-button {
+    min-width: 120px;
+}
+
+/* Equipped Item Indicator */
+.tah-style-uesrpg3ev4 [data-group-id="armor"] .tah-action-button.active {
+    border-left: 3px solid #44ff44;
+}

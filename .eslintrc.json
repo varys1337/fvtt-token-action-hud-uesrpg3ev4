@@ -10,7 +10,20 @@
         "ecmaVersion": "latest",
         "sourceType": "module"
     },
+    "globals": {
+        "game": "readonly",
+        "ui": "readonly",
+        "canvas": "readonly",
+        "Hooks": "readonly",
+        "ChatMessage": "readonly",
+        "Dialog": "readonly",
+        "Actor": "readonly",
+        "Item": "readonly",
+        "Token": "readonly",
+        "foundry": "readonly"
+    },
     "rules": {
-        "indent": ["error", 4]
+        "indent": ["error", 4],
+        "import/no-absolute-path": "off"
     }
 }

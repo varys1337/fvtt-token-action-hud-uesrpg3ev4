@@ -30,7 +30,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @returns {object} The available roll handlers
          */
         getAvailableRollHandlers () {
-            const coreTitle = 'Core Template'
+            const coreTitle = 'UESRPG 3ev4 Core'
             const choices = { core: coreTitle }
             return choices
         }
@@ -80,11 +80,11 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          */
         registerStyles () {
             return {
-                template: {
-                    class: 'tah-style-template-style', // The class to add to first DIV element
-                    file: 'tah-template-style', // The file without the css extension
-                    moduleId: MODULE.ID, // The module ID
-                    name: 'Template Style' // The name to display in the Token Action HUD Core 'Style' module setting
+                uesrpg3ev4: {
+                    class: 'tah-style-uesrpg3ev4',
+                    file: 'token-action-hud-uesrpg3ev4',
+                    moduleId: MODULE.ID,
+                    name: 'UESRPG 3ev4 Style'
                 }
             }
         }

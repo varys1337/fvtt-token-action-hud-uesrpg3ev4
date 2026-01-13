@@ -1,7 +1,7 @@
 {
-  "id": "token-action-hud-template",
-  "title": "Token Action HUD Template",
-  "description": "Token Action HUD is a repositionable HUD of actions for a selected token",
+  "id": "token-action-hud-uesrpg3ev4",
+  "title": "Token Action HUD UESRPG 3ev4",
+  "description": "Token Action HUD for the UESRPG 3ev4 system - quick access to combat actions, skills, spells, items, and features",
   "authors": [
     {
       "name": "Larkinabout",
@@ -13,7 +13,7 @@
   "version": "This is auto replaced",
   "compatibility": {
     "minimum": "11",
-    "verified": "11.313"
+    "verified": "13"
   },
   "esmodules": [
     "./scripts/init.js"
@@ -21,7 +21,7 @@
   "scripts": [
   ],
   "styles": [
-    "./styles/tah-template-style.css"
+    "./styles/token-action-hud-uesrpg3ev4.css"
   ],
   "languages": [
     {
@@ -34,7 +34,7 @@
   "relationships": {
     "systems": [
       {
-        "id": "template",
+        "id": "uesrpg-3ev4",
         "type": "system",
         "compatibility": [
           {
@@ -50,9 +50,8 @@
         "type": "module",
         "compatibility": [
           {
-            "minimum": "1.5.0",
-            "maximum": "1.5",
-            "verified": "1.5.0"
+            "minimum": "2.0.0",
+            "verified": "2.0.0"
           }
         ]
       }
