@@ -30,16 +30,20 @@
 }
 
 #token-action-hud {
-    align-items: center;
+    align-items: center !important;
     border-radius: var(--tah-border-radius);
-    display: flex;
-    flex-direction: row;
+    display: flex !important;
+    flex-direction: row !important;
     height: auto;
-    left: 150px;
-    position: fixed;
-    top: 80px;
+    position: fixed !important;
     width: auto;
     z-index: 100;
+    /* Default bottom position - centered horizontally */
+    bottom: 60px !important;
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    top: auto !important;
+    right: auto !important;
 }
 
 #token-action-hud [class*="icon-"] {
@@ -63,9 +67,11 @@
     display: none !important;
 }
 
+/* Show control buttons - always visible when unlocked, on hover when locked */
 #token-action-hud:hover #tah-collapse-hud,
-#token-action-hud:hover > #tah-buttons {
-    display: flex;
+#token-action-hud:hover > #tah-buttons,
+#token-action-hud:not(.tah-locked) > #tah-buttons {
+    display: flex !important;
 }
 
 #tah-collapse-hud,
@@ -77,6 +83,13 @@
     height: var(--tah-button-height);
     position: relative;
     z-index: 1;
+    margin-right: 5px;
+    flex-shrink: 0;
+}
+
+/* Always show buttons when HUD is unlocked */
+#token-action-hud:not(.tah-locked) > #tah-buttons {
+    display: flex !important;
 }
 
 #tah-collapse-expand {
@@ -249,21 +262,42 @@
     font-size: var(--font-size-16);
 }
 
+/* Force horizontal layout for tab groups */
 #tah-groups,
 .tah-tab-groups {
-    display: flex;
+    display: flex !important;
+    flex-direction: row !important;
     gap: var(--tah-gap);
     position: relative;
+    margin: 0;
+    padding: 0;
+    align-items: center !important;
+    flex-wrap: nowrap !important;
 }
 
 .tah-tab-groups {
     width: max-content;
+    flex-direction: row !important;
+    display: flex !important;
 }
 
-.tah-tab-group,
+.tah-tab-group {
+    display: flex !important;
+    position: relative;
+    margin: 0;
+    padding: 0;
+    align-items: center !important;
+    flex-direction: column !important;
+    flex-shrink: 0;
+    /* Each tab button is vertical, but tabs are arranged horizontally */
+}
+
 .tah-group {
     display: flex;
     position: relative;
+    margin: 0;
+    padding: 0;
+    align-items: flex-start;
 }
 
 .tah-groups-container {
@@ -277,21 +311,22 @@
 }
 
 .tah-tab-group > .tah-groups-container.expand-down > .tah-groups {
-    flex-direction: column;
+    flex-direction: row !important;
     left: -10px;
     padding: 3px 10px 10px 10px;
     position: relative;
 }
 
 .tah-tab-group > .tah-groups-container.expand-up > .tah-groups {
-    flex-direction: column;
+    flex-direction: row !important;
     left: -10px;
     padding: 10px 10px 3px 10px;
     position: relative;
 }
 
+/* Force horizontal for expand-up groups */
 #tah-groups > .tah-tab-group > .tah-groups-container.expand-up > .tah-groups {
-    flex-direction: column-reverse;
+    flex-direction: row !important;
 }
 
 .tah-tab-group > .tah-groups-container.expand-down {
@@ -300,16 +335,18 @@
 }
 
 .tah-tab-group > .tah-groups-container.expand-up {
-    bottom: calc(100% + 3px + -10px);
-    flex-direction: column-reverse;
+    bottom: calc(100% + 7px);
+    flex-direction: row !important;
     padding-bottom: 10px;
 }
 
+/* Force horizontal for list groups inside expanded tab groups */
 .tah-tab-group
     > .tah-groups-container.expand-up
     > .tah-groups
     > .tah-list-groups {
-    flex-direction: column-reverse;
+    flex-direction: row !important;
+    display: flex !important;
 }
 
 .tah-list-groups,
@@ -322,6 +359,9 @@
     flex-direction: column;
     display: flex;
     gap: var(--tah-gap);
+    margin: 0;
+    padding: 0;
+    position: relative;
 }
 
 .tah-list-groups .tah-list-groups {
@@ -332,13 +372,32 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
+    margin: 0;
+    padding: 0;
+    position: relative;
 }
 
+/* Groups inside tab groups should be horizontal when expanded */
+.tah-tab-groups .tah-groups,
+.tah-tab-group > .tah-groups-container > .tah-groups {
+    display: flex !important;
+    flex-direction: row !important;
+    gap: var(--tah-gap);
+    width: max-content;
+    margin: 0;
+    padding: 0;
+    position: relative;
+}
+
+/* Default groups (nested) remain column */
 .tah-groups {
     display: flex;
     flex-direction: column;
     gap: var(--tah-gap);
     width: max-content;
+    margin: 0;
+    padding: 0;
+    position: relative;
 }
 
 .tah-groups.expand-down {
@@ -386,9 +445,13 @@
     font-size: var(--tah-font-size-10);
     gap: var(--tah-gap);
     letter-spacing: 0.1em;
-    line-height: 1;
+    line-height: 1.2;
     text-shadow: var(--tah-text-shadow);
     text-transform: uppercase;
+    margin: 0;
+    padding: 2px 0;
+    position: relative;
+    z-index: 1;
 }
 
 .tah-subtitle:hover {
@@ -551,4 +614,81 @@
 /* Equipped Item Indicator */
 .tah-style-uesrpg3ev4 [data-group-id="armor"] .tah-action-button.active {
     border-left: 3px solid #44ff44;
+}
+
+/* Fix overlapping elements - ensure proper spacing */
+.tah-group > .tah-list-group {
+    margin-top: 0;
+    padding-top: 0;
+    position: relative;
+}
+
+.tah-group > .tah-list-group > .tah-subtitle {
+    margin-bottom: 4px;
+    padding-bottom: 2px;
+    display: block;
+    width: 100%;
+}
+
+.tah-group > .tah-list-group > .tah-groups {
+    margin-top: 0;
+    padding-top: 0;
+}
+
+/* Ensure actions don't overlap with subtitles */
+.tah-list-group > .tah-actions {
+    margin-top: 0;
+    padding-top: 0;
+    position: relative;
+    z-index: 0;
+}
+
+/* Fix tab group spacing */
+.tah-tab-group > .tah-groups-container {
+    margin: 0;
+    padding: 0;
+}
+
+.tah-tab-group > .tah-groups-container > .tah-groups {
+    margin: 0;
+    padding: 0;
+}
+
+/* CRITICAL: Force horizontal layout for all tab group containers */
+#token-action-hud #tah-groups,
+#token-action-hud .tah-tab-groups {
+    flex-direction: row !important;
+    display: flex !important;
+}
+
+/* Force horizontal layout for expanded groups */
+#token-action-hud .tah-tab-group > .tah-groups-container > .tah-groups,
+#token-action-hud .tah-tab-group > .tah-groups-container.expand-up > .tah-groups,
+#token-action-hud .tah-tab-group > .tah-groups-container.expand-down > .tah-groups {
+    flex-direction: row !important;
+}
+
+/* Ensure list groups inside expanded containers are also horizontal */
+#token-action-hud .tah-tab-group > .tah-groups-container > .tah-groups > .tah-list-groups {
+    flex-direction: row !important;
+    display: flex !important;
+}
+
+/* FINAL FIX: Force horizontal layout for tab groups - highest specificity */
+#token-action-hud #tah-groups.tah-tab-groups,
+#token-action-hud > #tah-groups.tah-tab-groups,
+#token-action-hud .tah-tab-groups {
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    align-items: flex-start !important;
+}
+
+/* Each tab group is a vertical button, but tabs are arranged horizontally */
+#token-action-hud .tah-tab-groups > .tah-tab-group {
+    display: flex !important;
+    flex-direction: column !important;
+    flex-shrink: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
 }
