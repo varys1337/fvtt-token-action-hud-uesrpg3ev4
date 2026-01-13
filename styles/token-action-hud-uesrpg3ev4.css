@@ -38,6 +38,7 @@
     position: fixed !important;
     width: auto;
     z-index: 100;
+    max-width: 95vw !important;
     /* Default bottom position - centered horizontally */
     bottom: 60px !important;
     left: 50% !important;
@@ -701,6 +702,8 @@
     flex-direction: row !important;
     flex-wrap: nowrap !important;
     gap: var(--tah-gap) !important;
+    z-index: 101 !important;
+    position: relative !important;
 }
 
 /* Individual category tabs */
@@ -714,6 +717,7 @@
 #token-action-hud .tah-subcategory {
     display: block !important;
     width: 100% !important;
+    z-index: 103 !important;
 }
 
 /* 3. Prevent button wrapping */
@@ -774,19 +778,4 @@
     display: grid !important;
     grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)) !important;
     gap: var(--tah-gap) !important;
-}
-
-/* 8. Z-index hierarchy - prevent interference */
-#token-action-hud {
-    z-index: 100 !important;
-    max-width: 95vw !important;
-}
-
-#token-action-hud .tah-categories {
-    z-index: 101 !important;
-    position: relative !important;
-}
-
-#token-action-hud .tah-subcategory {
-    z-index: 103 !important;
 }
