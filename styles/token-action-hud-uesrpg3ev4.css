@@ -692,3 +692,121 @@
     margin: 0 !important;
     padding: 0 !important;
 }
+
+/* ===== TOKEN ACTION HUD UI LAYOUT FIXES ===== */
+
+/* 1. Ensure category tabs display horizontally */
+#token-action-hud .tah-categories {
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    gap: var(--tah-gap) !important;
+}
+
+/* Individual category tabs */
+#token-action-hud .tah-category {
+    display: inline-flex !important;
+    align-items: center !important;
+    white-space: nowrap !important;
+}
+
+/* 2. Fix nested group positioning - appear above tabs */
+#token-action-hud .tah-group-panel {
+    position: absolute !important;
+    bottom: 100% !important;
+    left: 0 !important;
+    margin-bottom: var(--tah-gap) !important;
+    z-index: 102 !important;
+}
+
+/* Subcategories within groups */
+#token-action-hud .tah-subcategory {
+    display: block !important;
+    width: 100% !important;
+}
+
+/* 3. Prevent button wrapping */
+#token-action-hud .tah-action-button {
+    flex-shrink: 0 !important;
+    min-width: var(--tah-button-min-width) !important;
+}
+
+/* 4. Fix tab button sizing */
+#token-action-hud .tah-category-button {
+    height: var(--tah-button-height) !important;
+    min-width: auto !important;
+    padding: 0 12px !important;
+    white-space: nowrap !important;
+}
+
+/* 5. Enhanced category button styling */
+#token-action-hud .tah-category-button {
+    background: var(--tah-button-background-color) !important;
+    border: none !important;
+    box-shadow: var(--tah-button-box-shadow) !important;
+    color: var(--tah-button-text-color) !important;
+    font-weight: 600 !important;
+    text-shadow: var(--tah-text-shadow) !important;
+    transition: all 0.2s ease !important;
+}
+
+#token-action-hud .tah-category-button:hover {
+    box-shadow: var(--tah-button-hover-box-shadow) !important;
+    color: var(--tah-button-hover-text-color) !important;
+}
+
+#token-action-hud .tah-category-button.tah-active {
+    background: var(--tah-button-active-background-color) !important;
+    box-shadow: var(--tah-button-active-box-shadow) !important;
+}
+
+/* 6. Group panel styling - appears above tabs */
+#token-action-hud .tah-group-panel {
+    background: rgba(0, 0, 0, 0.9) !important;
+    border-radius: var(--tah-border-radius) !important;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.8) !important;
+    padding: var(--tah-gap) !important;
+    max-width: 600px !important;
+}
+
+/* 7. Group header styling */
+#token-action-hud .tah-group-header {
+    color: var(--tah-text-primary-color) !important;
+    font-weight: 600 !important;
+    margin-bottom: var(--tah-gap) !important;
+    text-shadow: var(--tah-text-shadow) !important;
+}
+
+/* 8. Action grid layout within groups */
+#token-action-hud .tah-actions-grid {
+    display: grid !important;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)) !important;
+    gap: var(--tah-gap) !important;
+}
+
+/* 9. Z-index hierarchy - prevent interference */
+#token-action-hud {
+    z-index: 100 !important;
+}
+
+#token-action-hud .tah-categories {
+    z-index: 101 !important;
+    position: relative !important;
+}
+
+#token-action-hud .tah-group-panel {
+    z-index: 102 !important;
+}
+
+#token-action-hud .tah-subcategory {
+    z-index: 103 !important;
+}
+
+/* 10. Responsive behavior - prevent HUD from becoming too wide */
+#token-action-hud {
+    max-width: 95vw !important;
+}
+
+#token-action-hud .tah-group-panel {
+    max-width: min(600px, 90vw) !important;
+}
