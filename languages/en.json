@@ -1,18 +1,74 @@
 {
   "tokenActionHud": {
-    "template": {
-      "armor": "Armor",
-      "containers": "Containers",
-      "consumables": "Consumables",
-      "equipment": "Equipment",
+    "uesrpg3ev4": {
+      "combatActions": "Combat Actions",
+      "skills": "Skills",
       "inventory": "Inventory",
-      "item": "Item",
+      "spells": "Spells",
+      "features": "Features",
+      "actionTracking": "Action Tracking",
+      
+      "primaryActions": "Primary Actions",
+      "secondaryActions": "Secondary Actions",
+      "reactions": "Reactions",
+      "specialActions": "Special Actions",
+      
+      "attackMelee": "Attack (Melee)",
+      "attackRanged": "Attack (Ranged)",
+      "aim": "Aim",
+      "castMagic": "Cast Magic",
+      "dash": "Dash",
+      "disengage": "Disengage",
+      "hide": "Hide",
+      "useItem": "Use Item",
+      "defensiveStance": "Defensive Stance",
+      "opportunityAttack": "Opportunity Attack",
+      
+      "arise": "Arise",
+      "shove": "Shove",
+      "grapple": "Grapple",
+      "trip": "Trip",
+      "disarm": "Disarm",
+      
+      "coreSkills": "Core Skills",
+      "magicSkills": "Magic Skills",
+      "combatStyles": "Combat Styles",
+      
       "weapons": "Weapons",
-      "treasure": "Treasure",
+      "armor": "Armor",
+      "items": "Items",
+      "ammunition": "Ammunition",
+      
+      "alterationSpells": "Alteration Spells",
+      "conjurationSpells": "Conjuration Spells",
+      "destructionSpells": "Destruction Spells",
+      "illusionSpells": "Illusion Spells",
+      "mysticismSpells": "Mysticism Spells",
+      "restorationSpells": "Restoration Spells",
+      "otherSpells": "Other Spells",
+      
+      "talents": "Talents",
+      "traits": "Traits",
+      "powers": "Powers",
+      
+      "actionPoints": "Action Points",
+      "attacksThisRound": "Attacks This Round",
+      
+      "attack": "Attack",
+      "skill": "Skill",
+      "magicSkill": "Magic Skill",
+      "combatStyle": "Combat Style",
+      "weapon": "Weapon",
+      "item": "Item",
+      "spell": "Spell",
+      "talent": "Talent",
+      "trait": "Trait",
+      "power": "Power",
+      
       "settings": {
         "displayUnequipped": {
-          "hint": "Choose whether to display unequipped items on the HUD",
-          "name": "Display Unequipped"
+          "hint": "Display unequipped weapons and armor in the HUD",
+          "name": "Display Unequipped Items"
         }
       }
     }

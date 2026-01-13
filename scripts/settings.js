@@ -7,13 +7,12 @@ import { MODULE } from './constants.js'
  */
 export function register (coreUpdate) {
     game.settings.register(MODULE.ID, 'displayUnequipped', {
-        name: game.i18n.localize('tokenActionHud.template.settings.displayUnequipped.name'),
-        hint: game.i18n.localize('tokenActionHud.template.settings.displayUnequipped.hint'
-        ),
+        name: game.i18n.localize('tokenActionHud.uesrpg3ev4.settings.displayUnequipped.name'),
+        hint: game.i18n.localize('tokenActionHud.uesrpg3ev4.settings.displayUnequipped.hint'),
         scope: 'client',
         config: true,
         type: Boolean,
-        default: true,
+        default: false,
         onChange: (value) => {
             coreUpdate(value)
         }
