@@ -127,7 +127,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 encodedValue: ['castMagic', 'cast'].join(this.delimiter)
             })
 
-            this.addActions(actions, groupData)
+            if (actions.length > 0) {
+                this.addActions(actions, groupData)
+            }
         }
 
         /**
@@ -167,7 +169,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 encodedValue: ['useItem', 'use'].join(this.delimiter)
             })
 
-            this.addActions(actions, groupData)
+            if (actions.length > 0) {
+                this.addActions(actions, groupData)
+            }
         }
 
         /**
@@ -193,7 +197,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 encodedValue: ['opportunityAttack', 'opportunity'].join(this.delimiter)
             })
 
-            this.addActions(actions, groupData)
+            if (actions.length > 0) {
+                this.addActions(actions, groupData)
+            }
         }
 
         /**
@@ -234,7 +240,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 })
             }
 
-            this.addActions(actions, groupData)
+            if (actions.length > 0) {
+                this.addActions(actions, groupData)
+            }
         }
 
         /**
@@ -273,7 +281,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 })
             }
 
-            this.addActions(actions, groupData)
+            if (actions.length > 0) {
+                this.addActions(actions, groupData)
+            }
         }
 
         /**
@@ -302,7 +312,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 })
             }
 
-            this.addActions(actions, groupData)
+            if (actions.length > 0) {
+                this.addActions(actions, groupData)
+            }
         }
 
         /**
@@ -334,7 +346,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 })
             }
 
-            this.addActions(actions, groupData)
+            if (actions.length > 0) {
+                this.addActions(actions, groupData)
+            }
         }
 
         /**
@@ -376,7 +390,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 })
             }
 
-            this.addActions(actions, groupData)
+            if (actions.length > 0) {
+                this.addActions(actions, groupData)
+            }
         }
 
         /**
@@ -406,7 +422,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 })
             }
 
-            this.addActions(actions, groupData)
+            if (actions.length > 0) {
+                this.addActions(actions, groupData)
+            }
         }
 
         /**
@@ -431,7 +449,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 })
             }
 
-            this.addActions(actions, groupData)
+            if (actions.length > 0) {
+                this.addActions(actions, groupData)
+            }
         }
 
         /**
@@ -457,7 +477,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 })
             }
 
-            this.addActions(actions, groupData)
+            if (actions.length > 0) {
+                this.addActions(actions, groupData)
+            }
         }
 
         /**
@@ -506,7 +528,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                     })
                 }
 
-                this.addActions(actions, groupData)
+                if (actions.length > 0) {
+                    this.addActions(actions, groupData)
+                }
             }
         }
 
@@ -545,7 +569,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 })
             }
 
-            this.addActions(actions, groupData)
+            if (actions.length > 0) {
+                this.addActions(actions, groupData)
+            }
         }
 
         /**
@@ -573,7 +599,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 })
             }
 
-            this.addActions(actions, groupData)
+            if (actions.length > 0) {
+                this.addActions(actions, groupData)
+            }
         }
 
         /**
@@ -601,7 +629,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 })
             }
 
-            this.addActions(actions, groupData)
+            if (actions.length > 0) {
+                this.addActions(actions, groupData)
+            }
         }
 
         /**
@@ -639,7 +669,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 cssClass: 'toggle disabled'
             })
 
-            this.addActions(actions, groupData)
+            if (actions.length > 0) {
+                this.addActions(actions, groupData)
+            }
         }
     }
 })
