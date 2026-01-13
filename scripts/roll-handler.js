@@ -21,7 +21,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 return this.doRenderItem(this.actor, actionId)
             }
 
-            const knownCharacters = ['character', 'npc']
+            const knownCharacters = ['Player Character', 'NPC']
 
             // If single actor is selected
             if (this.actor) {
@@ -143,24 +143,32 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
         async #handleAttackAction (event, actor, actionId) {
             try {
                 // Find equipped weapon of the appropriate type
-                const weaponType = actionId === 'melee' ? 'melee' : 'ranged'
+                const attackMode = actionId === 'melee' ? 'melee' : 'ranged'
                 const weapon = actor.items.find(item =>
                     item.type === 'weapon' &&
                     item.system?.equipped &&
-                    item.system?.weaponType === weaponType
+                    item.system?.attackMode === attackMode
                 )
 
                 if (!weapon) {
-                    ui.notifications.warn(`No ${weaponType} weapon equipped`)
+                    ui.notifications.warn(`No ${attackMode} weapon equipped`)
                     return
                 }
+
+                // Get target token if one is selected
+                const targetToken = canvas.tokens.controlled.find(t => t.id !== this.token?.id) || 
+                                   Array.from(canvas.tokens.placeables.values()).find(t => t.isTargeted)
 
                 // Dynamically import OpposedWorkflow from system
                 const { OpposedWorkflow } = await import('/systems/uesrpg-3ev4/module/combat/opposed-workflow.js')
 
-                // Create and execute attack workflow
-                const workflow = new OpposedWorkflow(actor, weapon)
-                await workflow.execute()
+                // Create pending attack workflow
+                await OpposedWorkflow.createPending({
+                    attackerTokenUuid: this.token?.document?.uuid || actor.uuid,
+                    defenderTokenUuid: targetToken?.document?.uuid || null,
+                    weaponUuid: weapon.uuid,
+                    attackMode: attackMode
+                })
             } catch (error) {
                 console.error('Error handling attack action:', error)
                 ui.notifications.error('Failed to execute attack. See console for details.')
@@ -425,7 +433,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 const meleeWeapon = actor.items.find(item =>
                     item.type === 'weapon' &&
                     item.system?.equipped &&
-                    item.system?.weaponType === 'melee'
+                    item.system?.attackMode === 'melee'
                 )
 
                 if (!meleeWeapon) {
@@ -449,12 +457,20 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          */
         async #handleSpecialAction (event, actor, actionId) {
             try {
+                // Get target token if one is selected
+                const targetToken = canvas.tokens.controlled.find(t => t.id !== this.token?.id) || 
+                                   Array.from(canvas.tokens.placeables.values()).find(t => t.isTargeted)
+
                 // Dynamically import SkillOpposedWorkflow from system
                 const { SkillOpposedWorkflow } = await import('/systems/uesrpg-3ev4/module/skills/opposed-workflow.js')
 
-                // Create and execute special action workflow
-                const workflow = new SkillOpposedWorkflow(actor, actionId)
-                await workflow.execute()
+                // Create pending skill opposed workflow for special action
+                await SkillOpposedWorkflow.createPending({
+                    attackerTokenUuid: this.token?.document?.uuid || actor.uuid,
+                    defenderTokenUuid: targetToken?.document?.uuid || null,
+                    attackerSkillUuid: null, // Let user choose from dropdown
+                    attackerSkillLabel: actionId.charAt(0).toUpperCase() + actionId.slice(1)
+                })
             } catch (error) {
                 console.error('Error handling special action:', error)
                 // Fallback to chat message
@@ -477,16 +493,23 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             if (!skill) return
 
             try {
-                // Check if skill has a roll method
-                if (typeof skill.roll === 'function') {
-                    await skill.roll()
-                } else {
-                    // Fallback to posting to chat
-                    skill.toChat(event)
-                }
+                // Get target token if one is selected
+                const targetToken = canvas.tokens.controlled.find(t => t.id !== this.token?.id) || 
+                                   Array.from(canvas.tokens.placeables.values()).find(t => t.isTargeted)
+
+                // Dynamically import SkillOpposedWorkflow from system
+                const { SkillOpposedWorkflow } = await import('/systems/uesrpg-3ev4/module/skills/opposed-workflow.js')
+
+                // Create pending skill opposed workflow
+                await SkillOpposedWorkflow.createPending({
+                    attackerTokenUuid: this.token?.document?.uuid || actor.uuid,
+                    defenderTokenUuid: targetToken?.document?.uuid || null,
+                    attackerSkillUuid: skill.uuid
+                })
             } catch (error) {
                 console.error('Error rolling skill:', error)
-                skill.toChat(event)
+                // Fallback to opening skill sheet
+                skill.sheet.render(true)
             }
         }
 
@@ -562,19 +585,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 return weapon.sheet.render(true)
             }
 
-            // Left-click: roll damage
-            try {
-                // Check if weapon has a rollDamage method
-                if (typeof weapon.rollDamage === 'function') {
-                    await weapon.rollDamage()
-                } else {
-                    // Fallback to posting to chat
-                    weapon.toChat(event)
-                }
-            } catch (error) {
-                console.error('Error rolling weapon damage:', error)
-                weapon.toChat(event)
-            }
+            // Left-click: open sheet (weapon damage is rolled through attack workflow)
+            weapon.sheet.render(true)
         }
 
         /**
@@ -606,8 +618,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const item = actor.items.get(actionId)
             if (!item) return
 
-            // Post to chat
-            item.toChat(event)
+            // Open item sheet
+            item.sheet.render(true)
         }
 
         /**
@@ -637,12 +649,19 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             if (!spell) return
 
             try {
+                // Get target token if one is selected
+                const targetToken = canvas.tokens.controlled.find(t => t.id !== this.token?.id) || 
+                                   Array.from(canvas.tokens.placeables.values()).find(t => t.isTargeted)
+
                 // Dynamically import MagicOpposedWorkflow from system
                 const { MagicOpposedWorkflow } = await import('/systems/uesrpg-3ev4/module/magic/opposed-workflow.js')
 
-                // Create and execute spell casting workflow
-                const workflow = new MagicOpposedWorkflow(actor, spell)
-                await workflow.execute()
+                // Create pending magic opposed workflow
+                await MagicOpposedWorkflow.createPending({
+                    attackerTokenUuid: this.token?.document?.uuid || actor.uuid,
+                    defenderTokenUuid: targetToken?.document?.uuid || null,
+                    spellUuid: spell.uuid
+                })
             } catch (error) {
                 console.error('Error casting spell:', error)
                 // Fallback to opening spell sheet
@@ -661,8 +680,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const feature = actor.items.get(actionId)
             if (!feature) return
 
-            // Post to chat
-            feature.toChat(event)
+            // Open feature sheet
+            feature.sheet.render(true)
         }
 
         /**

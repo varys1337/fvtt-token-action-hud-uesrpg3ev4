@@ -10,6 +10,36 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
      */
     ActionHandler = class ActionHandler extends coreModule.api.ActionHandler {
         /**
+         * Get items count safely (handles both Collection and Array)
+         * @private
+         * @returns {number} The number of items
+         */
+        #getItemsCount () {
+            if (!this.items) return 0
+            // Collection has .size, Array has .length
+            return this.items.size !== undefined ? this.items.size : (this.items.length || 0)
+        }
+
+        /**
+         * Get items iterator that works with both Collection and Array
+         * @private
+         * @returns {Iterable} Iterator for items
+         */
+        #getItemsIterator () {
+            if (!this.items) return []
+            // If it's a Collection (has .entries method), use entries
+            if (typeof this.items.entries === 'function') {
+                return this.items.entries()
+            }
+            // If it's an Array, convert to [id, item] pairs
+            if (Array.isArray(this.items)) {
+                return this.items.map(item => [item.id || item._id, item])
+            }
+            // Fallback: try to iterate as-is
+            return this.items
+        }
+
+        /**
          * Build system actions
          * Called by Token Action HUD Core
          * @override
@@ -23,14 +53,20 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             // Settings
             this.displayUnequipped = Utils.getSetting('displayUnequipped')
 
-            // Set items variable
-            if (this.actor) {
+            // Set items variable - ensure it's always initialized
+            if (this.actor?.items) {
                 let items = this.actor.items
                 items = coreModule.api.Utils.sortItemsByName(items)
-                this.items = items
+                // Ensure items is always set (even if empty)
+                // sortItemsByName may return Collection or Array - both are fine
+                this.items = items || this.actor.items || []
+            } else {
+                // Initialize empty array if no actor
+                this.items = []
             }
 
-            if (this.actorType === 'character' || this.actorType === 'npc') {
+            // Fix: System uses 'Player Character' and 'NPC' (capitalized with space)
+            if (this.actorType === 'Player Character' || this.actorType === 'NPC') {
                 await this.#buildCharacterActions()
             } else if (!this.actor) {
                 this.#buildMultipleTokenActions()
@@ -86,10 +122,10 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const actions = []
 
             // Attack (Melee) - if melee weapon equipped
-            const hasMeleeWeapon = this.actor.items?.some(item =>
+            const hasMeleeWeapon = this.actor?.items?.some(item =>
                 item.type === 'weapon' &&
                 item.system?.equipped &&
-                item.system?.weaponType === 'melee'
+                item.system?.attackMode === 'melee'
             )
             if (hasMeleeWeapon) {
                 actions.push({
@@ -100,10 +136,10 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             }
 
             // Attack (Ranged) - if ranged weapon equipped
-            const hasRangedWeapon = this.actor.items?.some(item =>
+            const hasRangedWeapon = this.actor?.items?.some(item =>
                 item.type === 'weapon' &&
                 item.system?.equipped &&
-                item.system?.weaponType === 'ranged'
+                item.system?.attackMode === 'ranged'
             )
             if (hasRangedWeapon) {
                 actions.push({
@@ -260,14 +296,14 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @private
          */
         async #buildCoreSkills () {
-            if (!this.items || this.items.size === 0) return
+            if (this.#getItemsCount() === 0) return
 
             const groupId = 'coreSkills'
             const groupData = { id: groupId, type: 'system' }
             const actions = []
 
-            for (const [itemId, itemData] of this.items) {
-                if (itemData.type !== 'skill') continue
+            for (const [itemId, itemData] of this.#getItemsIterator()) {
+                if (!itemData || itemData.type !== 'skill') continue
                 if (itemData.system?.category === 'magic') continue // Magic skills in separate group
 
                 const tn = itemData.system?.tn || 0
@@ -291,14 +327,14 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @private
          */
         async #buildMagicSkills () {
-            if (!this.items || this.items.size === 0) return
+            if (this.#getItemsCount() === 0) return
 
             const groupId = 'magicSkills'
             const groupData = { id: groupId, type: 'system' }
             const actions = []
 
-            for (const [itemId, itemData] of this.items) {
-                if (itemData.type !== 'skill') continue
+            for (const [itemId, itemData] of this.#getItemsIterator()) {
+                if (!itemData || itemData.type !== 'skill') continue
                 if (itemData.system?.category !== 'magic') continue
 
                 const rank = itemData.system?.rank || 0
@@ -322,14 +358,14 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @private
          */
         async #buildCombatStyles () {
-            if (!this.items || this.items.size === 0) return
+            if (this.#getItemsCount() === 0) return
 
             const groupId = 'combatStyles'
             const groupData = { id: groupId, type: 'system' }
             const actions = []
 
-            for (const [itemId, itemData] of this.items) {
-                if (itemData.type !== 'combatStyle') continue
+            for (const [itemId, itemData] of this.#getItemsIterator()) {
+                if (!itemData || itemData.type !== 'combatStyle') continue
 
                 const value = itemData.system?.value || 0
                 const rank = itemData.system?.rank || 0
@@ -356,7 +392,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @private
          */
         async #buildInventory () {
-            if (!this.items || this.items.size === 0) return
+            if (this.#getItemsCount() === 0) return
 
             await this.#buildWeapons()
             await this.#buildArmor()
@@ -373,8 +409,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const groupData = { id: groupId, type: 'system' }
             const actions = []
 
-            for (const [itemId, itemData] of this.items) {
-                if (itemData.type !== 'weapon') continue
+            for (const [itemId, itemData] of this.#getItemsIterator()) {
+                if (!itemData || itemData.type !== 'weapon') continue
 
                 const equipped = itemData.system?.equipped || false
                 if (!equipped && !this.displayUnequipped) continue
@@ -404,8 +440,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const groupData = { id: groupId, type: 'system' }
             const actions = []
 
-            for (const [itemId, itemData] of this.items) {
-                if (itemData.type !== 'armor') continue
+            for (const [itemId, itemData] of this.#getItemsIterator()) {
+                if (!itemData || itemData.type !== 'armor') continue
 
                 const equipped = itemData.system?.equipped || false
                 if (!equipped && !this.displayUnequipped) continue
@@ -436,8 +472,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const groupData = { id: groupId, type: 'system' }
             const actions = []
 
-            for (const [itemId, itemData] of this.items) {
-                if (itemData.type !== 'item') continue
+            for (const [itemId, itemData] of this.#getItemsIterator()) {
+                if (!itemData || itemData.type !== 'item') continue
                 if (itemData.type === 'spell') continue // Exclude spells
 
                 const name = itemData.name
@@ -463,8 +499,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const groupData = { id: groupId, type: 'system' }
             const actions = []
 
-            for (const [itemId, itemData] of this.items) {
-                if (itemData.type !== 'ammunition') continue
+            for (const [itemId, itemData] of this.#getItemsIterator()) {
+                if (!itemData || itemData.type !== 'ammunition') continue
 
                 const quantity = itemData.system?.quantity || 0
                 const name = itemData.name
@@ -487,13 +523,13 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @private
          */
         async #buildSpells () {
-            if (!this.items || this.items.size === 0) return
+            if (this.#getItemsCount() === 0) return
 
             // Group spells by school
             const spellsBySchool = new Map()
 
-            for (const [itemId, itemData] of this.items) {
-                if (itemData.type !== 'spell') continue
+            for (const [itemId, itemData] of this.#getItemsIterator()) {
+                if (!itemData || itemData.type !== 'spell') continue
 
                 const school = itemData.system?.school || 'other'
                 if (!spellsBySchool.has(school)) {
@@ -549,14 +585,14 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @private
          */
         async #buildTalents () {
-            if (!this.items || this.items.size === 0) return
+            if (this.#getItemsCount() === 0) return
 
             const groupId = 'talents'
             const groupData = { id: groupId, type: 'system' }
             const actions = []
 
-            for (const [itemId, itemData] of this.items) {
-                if (itemData.type !== 'talent') continue
+            for (const [itemId, itemData] of this.#getItemsIterator()) {
+                if (!itemData || itemData.type !== 'talent') continue
 
                 const description = itemData.system?.description || ''
                 const name = itemData.name
@@ -579,14 +615,14 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @private
          */
         async #buildTraits () {
-            if (!this.items || this.items.size === 0) return
+            if (this.#getItemsCount() === 0) return
 
             const groupId = 'traits'
             const groupData = { id: groupId, type: 'system' }
             const actions = []
 
-            for (const [itemId, itemData] of this.items) {
-                if (itemData.type !== 'trait') continue
+            for (const [itemId, itemData] of this.#getItemsIterator()) {
+                if (!itemData || itemData.type !== 'trait') continue
 
                 const description = itemData.system?.description || ''
                 const name = itemData.name
@@ -609,14 +645,14 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @private
          */
         async #buildPowers () {
-            if (!this.items || this.items.size === 0) return
+            if (this.#getItemsCount() === 0) return
 
             const groupId = 'powers'
             const groupData = { id: groupId, type: 'system' }
             const actions = []
 
-            for (const [itemId, itemData] of this.items) {
-                if (itemData.type !== 'power') continue
+            for (const [itemId, itemData] of this.#getItemsIterator()) {
+                if (!itemData || itemData.type !== 'power') continue
 
                 const description = itemData.system?.description || ''
                 const name = itemData.name
