@@ -464,14 +464,6 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          */
         async #handleDefensiveStanceAction (event, actor) {
             try {
-                // Get existing defensive stance effects and count them for stacking
-                const existingStances = actor.effects.filter(e =>
-                    e.flags?.core?.statusId === 'defensive-stance' ||
-                    e.name === 'Defensive Stance'
-                )
-                const stackCount = existingStances.length
-                const newBonus = (stackCount + 1) * 10
-
                 // Apply defensive stance effect (+10 defensive tests per stack, stackable)
                 await actor.createEmbeddedDocuments('ActiveEffect', [{
                     name: 'Defensive Stance',
@@ -487,9 +479,16 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                     duration: { turns: 1 }
                 }])
 
+                // Count total stances after adding the new one
+                const totalStances = actor.effects.filter(e =>
+                    e.flags?.core?.statusId === 'defensive-stance' ||
+                    e.name === 'Defensive Stance'
+                ).length
+                const totalBonus = totalStances * 10
+
                 ChatMessage.create({
                     speaker: ChatMessage.getSpeaker({ actor }),
-                    content: `<strong>${actor.name}</strong> takes a <strong>Defensive Stance</strong> (+${newBonus} to defensive tests)!`
+                    content: `<strong>${actor.name}</strong> takes a <strong>Defensive Stance</strong> (total: +${totalBonus} to defensive tests)!`
                 })
             } catch (error) {
                 console.error('Error handling defensive stance action:', error)
