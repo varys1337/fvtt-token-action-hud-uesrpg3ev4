@@ -303,6 +303,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          */
         async #buildSkills () {
             await this.#buildCoreSkills()
+            await this.#buildMagicSkills()
             await this.#buildCombatStyles()
         }
 
@@ -617,8 +618,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 const actions = []
 
                 for (const { itemId, itemData } of spells) {
-                    const mpCost = itemData.system?.mpCost || 0
-                    const rank = itemData.system?.rank || 0
+                    // Get MP cost from system.cost and level from system.level (confirmed from magic workflow)
+                    const mpCost = itemData.system?.cost ?? 0
+                    const level = itemData.system?.level ?? 0
                     const description = itemData.system?.description || ''
                     const name = itemData.name
 
@@ -627,7 +629,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                         name,
                         encodedValue: ['spell', itemId].join(this.delimiter),
                         info1: { text: `MP ${mpCost}` },
-                        info2: { text: `Rank ${rank}` },
+                        info2: { text: `Level ${level}` },
                         tooltip: description
                     })
                 }
@@ -740,27 +742,27 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
         /**
          * Build action tracking display
+         * Always visible tracker buttons for Action Points and Attack Count
+         * Works for both PC and NPC actors - always visible in locked and unlocked states
+         * Combined into a single actionTracking group for reliability
          * @private
          */
         async #buildActionTracking () {
-            // Create TWO separate groups
+            // Ensure we have an actor
+            if (!this.actor) return
 
-            // Group 1: Action Points
-            const apGroupId = 'actionPoints'
-            const apGroupData = { id: apGroupId, type: 'system' }
-            const apActions = []
+            // Use a single combined group for action tracking
+            const groupId = 'actionTracking'
+            const groupData = { id: groupId, type: 'system' }
+            const actions = []
 
-            let currentAP, maxAP
-            if (this.actorType === 'NPC') {
-                currentAP = this.actor.system?.action_points?.value ?? 0
-                maxAP = this.actor.system?.action_points?.max ?? 0
-            } else {
-                // PC paths
-                currentAP = this.actor.system?.action_points?.value ?? 0
-                maxAP = this.actor.system?.action_points?.max ?? 0
-            }
+            // Get action points from system.action_points (confirmed from system template.json)
+            // Works for both PC and NPC - same path
+            const currentAP = Number(this.actor.system?.action_points?.value ?? 0)
+            const maxAP = Number(this.actor.system?.action_points?.max ?? 0)
 
-            apActions.push({
+            // Add Action Points tracker button (non-clickable, always visible)
+            actions.push({
                 id: 'action-points',
                 name: coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.actionPoints'),
                 encodedValue: ['utility', 'action-points'].join(this.delimiter),
@@ -768,27 +770,16 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                     text: `${currentAP}/${maxAP}`,
                     class: currentAP === 0 ? 'tah-spotlight' : ''
                 },
-                cssClass: 'toggle disabled'
+                cssClass: 'disabled' // Non-clickable tracker button
             })
 
-            this.addActions(apActions, apGroupData)
+            // Get attack count from system.combat_tracking.attacks_this_round (confirmed from AttackTracker and template.json)
+            // Works for both PC and NPC - same path
+            const currentAttacks = Number(this.actor.system?.combat_tracking?.attacks_this_round ?? 0)
+            const maxAttacks = 2 // RAW: Maximum 2 attacks per round
 
-            // Group 2: Attacks This Round
-            const attacksGroupId = 'attacksThisRound'
-            const attacksGroupData = { id: attacksGroupId, type: 'system' }
-            const attacksActions = []
-
-            let currentAttacks, maxAttacks
-            if (this.actorType === 'NPC') {
-                currentAttacks = this.actor.system?.combat_tracking?.attacks_this_round ?? 0
-                maxAttacks = 2 // NPCs default to 2 attacks per round
-            } else {
-                // PC paths
-                currentAttacks = this.actor.system?.combat_tracking?.attacks_this_round ?? 0
-                maxAttacks = 2
-            }
-
-            attacksActions.push({
+            // Add Attack Count tracker button (non-clickable, always visible)
+            actions.push({
                 id: 'attacks-this-round',
                 name: coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.attacksThisRound'),
                 encodedValue: ['utility', 'attacks-this-round'].join(this.delimiter),
@@ -796,10 +787,11 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                     text: `${currentAttacks}/${maxAttacks}`,
                     class: currentAttacks >= maxAttacks ? 'tah-spotlight' : ''
                 },
-                cssClass: 'toggle disabled'
+                cssClass: 'disabled' // Non-clickable tracker button
             })
 
-            this.addActions(attacksActions, attacksGroupData)
+            // Always add the group with both trackers (should always have 2 actions)
+            this.addActions(actions, groupData)
         }
     }
 })

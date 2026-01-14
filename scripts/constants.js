@@ -106,6 +106,8 @@ export const GROUP = {
 
     // Action Tracking
     actionTracking: { id: 'actionTracking', name: 'tokenActionHud.uesrpg3ev4.actionTracking', type: 'system' },
+    actionPoints: { id: 'actionPoints', name: 'tokenActionHud.uesrpg3ev4.actionPoints', type: 'system' },
+    attacksThisRound: { id: 'attacksThisRound', name: 'tokenActionHud.uesrpg3ev4.attacksThisRound', type: 'system' },
 
     // Utility
     combat: { id: 'combat', name: 'tokenActionHud.combat', type: 'system' },
