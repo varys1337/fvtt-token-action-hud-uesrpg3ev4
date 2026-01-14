@@ -1,6 +1,5 @@
 // System Module Imports
 import { SPELL_SCHOOLS } from './constants.js'
-import { Utils } from './utils.js'
 
 export let ActionHandler = null
 
@@ -296,21 +295,19 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const groupData = { id: groupId, type: 'system' }
             const actions = []
 
-            // For NPCs, build from professions (actor data, not items)
+            // For NPCs, build from professions
             if (this.actorType === 'NPC') {
                 const professions = this.actor.system?.professions || {}
                 const skillsData = this.actor.system?.skills || {}
 
-                // Profession keys: profession1, profession2, profession3, combat, magic
-                const profKeys = ['profession1', 'profession2', 'profession3', 'combat', 'magic']
+                // Standard professions from system.professions
+                const standardProfs = ['combat', 'evade', 'knowledge', 'magic', 'observe', 'physical', 'social', 'stealth']
 
-                for (const key of profKeys) {
+                for (const key of standardProfs) {
                     const value = professions[key] || 0
                     if (value === 0) continue
 
-                    // Get specialization name if exists
-                    const spec = skillsData[key]?.specialization || ''
-                    const name = spec || key.replace('profession', 'Profession ')
+                    const name = key.charAt(0).toUpperCase() + key.slice(1)
 
                     actions.push({
                         id: `prof-${key}`,
@@ -319,15 +316,35 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                         info1: { text: `${value}%` }
                     })
                 }
-            } else {
-                // For PCs, use skill items
-                if (this.#getItemsCount() === 0) return
 
+                // Special professions from system.skills (commerce, profession1-3)
+                const specialProfs = ['commerce', 'profession1', 'profession2', 'profession3']
+
+                for (const key of specialProfs) {
+                    const skillData = skillsData[key]
+                    if (!skillData) continue
+
+                    // Get TN value
+                    const tn = skillData.tn || 0
+                    if (tn === 0) continue
+
+                    // Get name (specialization for profession1-3, or key name for commerce)
+                    const spec = String(skillData.specialization || '').trim()
+                    const name = spec || (key === 'commerce' ? 'Commerce' : key.replace('profession', 'Profession '))
+
+                    actions.push({
+                        id: `prof-${key}`,
+                        name,
+                        encodedValue: ['profession', key].join(this.delimiter),
+                        info1: { text: `${tn}%` }
+                    })
+                }
+            } else {
+                // For PCs, use skill items (excluding magic category)
                 for (const [itemId, itemData] of this.#getItemsIterator()) {
                     if (!itemData || itemData.type !== 'skill') continue
                     if (itemData.system?.category === 'magic') continue
 
-                    // Use the pre-computed value from system - this is the TN percentage
                     const tn = itemData.system?.value || 0
                     const name = itemData.name
 
@@ -706,39 +723,63 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @private
          */
         async #buildActionTracking () {
-            const groupId = 'actionTracking'
-            const groupData = { id: groupId, type: 'system' }
-            const actions = []
+            // Create TWO separate groups
 
-            // Action Points
-            const ap = Utils.getActionPoints(this.actor)
-            actions.push({
+            // Group 1: Action Points
+            const apGroupId = 'actionPoints'
+            const apGroupData = { id: apGroupId, type: 'system' }
+            const apActions = []
+
+            let currentAP, maxAP
+            if (this.actorType === 'NPC') {
+                currentAP = this.actor.system?.action_points?.value ?? 0
+                maxAP = this.actor.system?.action_points?.max ?? 0
+            } else {
+                // PC paths
+                currentAP = this.actor.system?.action_points?.value ?? 0
+                maxAP = this.actor.system?.action_points?.max ?? 0
+            }
+
+            apActions.push({
                 id: 'action-points',
                 name: coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.actionPoints'),
                 encodedValue: ['utility', 'action-points'].join(this.delimiter),
                 info1: {
-                    text: `${ap.current}/${ap.max}`,
-                    class: ap.current === 0 ? 'tah-spotlight' : ''
+                    text: `${currentAP}/${maxAP}`,
+                    class: currentAP === 0 ? 'tah-spotlight' : ''
                 },
                 cssClass: 'toggle disabled'
             })
 
-            // Attacks This Round
-            const attacks = Utils.getAttacksThisRound(this.actor)
-            actions.push({
+            this.addActions(apActions, apGroupData)
+
+            // Group 2: Attacks This Round
+            const attacksGroupId = 'attacksThisRound'
+            const attacksGroupData = { id: attacksGroupId, type: 'system' }
+            const attacksActions = []
+
+            let currentAttacks, maxAttacks
+            if (this.actorType === 'NPC') {
+                currentAttacks = this.actor.system?.combat_tracking?.attacks_this_round ?? 0
+                maxAttacks = 2 // NPCs default to 2 attacks per round
+            } else {
+                // PC paths
+                currentAttacks = this.actor.system?.combat_tracking?.attacks_this_round ?? 0
+                maxAttacks = 2
+            }
+
+            attacksActions.push({
                 id: 'attacks-this-round',
                 name: coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.attacksThisRound'),
                 encodedValue: ['utility', 'attacks-this-round'].join(this.delimiter),
                 info1: {
-                    text: `${attacks.current}/${attacks.limit}`,
-                    class: attacks.current >= attacks.limit ? 'tah-spotlight' : ''
+                    text: `${currentAttacks}/${maxAttacks}`,
+                    class: currentAttacks >= maxAttacks ? 'tah-spotlight' : ''
                 },
                 cssClass: 'toggle disabled'
             })
 
-            if (actions.length > 0) {
-                this.addActions(actions, groupData)
-            }
+            this.addActions(attacksActions, attacksGroupData)
         }
     }
 })
