@@ -156,7 +156,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 }
 
                 // Get target token if one is selected
-                const targetToken = canvas.tokens.controlled.find(t => t.id !== this.token?.id) || 
+                const targetToken = canvas.tokens.controlled.find(t => t.id !== this.token?.id) ||
                                    Array.from(canvas.tokens.placeables.values()).find(t => t.isTargeted)
 
                 // Dynamically import OpposedWorkflow from system
@@ -167,7 +167,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                     attackerTokenUuid: this.token?.document?.uuid || actor.uuid,
                     defenderTokenUuid: targetToken?.document?.uuid || null,
                     weaponUuid: weapon.uuid,
-                    attackMode: attackMode
+                    attackMode
                 })
             } catch (error) {
                 console.error('Error handling attack action:', error)
@@ -183,27 +183,99 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          */
         async #handleAimAction (event, actor) {
             try {
-                // Apply aim effect (stacking +10 bonus for ranged attacks)
-                const existingAim = actor.effects.find(e => e.flags?.core?.statusId === 'aim')
-                const currentBonus = existingAim?.changes?.[0]?.value || 0
-                const newBonus = parseInt(currentBonus) + 10
+                // Find all equipped ranged weapons
+                const rangedWeapons = actor.items.filter(item =>
+                    item.type === 'weapon' &&
+                    item.system?.equipped &&
+                    item.system?.attackMode === 'ranged'
+                )
 
-                if (existingAim) {
-                    await existingAim.delete()
+                if (rangedWeapons.length === 0) {
+                    ui.notifications.warn('No ranged weapon equipped to aim with')
+                    return
                 }
 
-                await actor.createEmbeddedDocuments('ActiveEffect', [{
-                    name: 'Aiming',
-                    icon: 'icons/svg/target.svg',
-                    flags: { core: { statusId: 'aim' } },
-                    changes: [{
-                        key: 'system.rangedAttackBonus',
-                        mode: 2,
-                        value: newBonus
-                    }]
-                }])
+                // Function to apply aim effect for a specific weapon
+                const applyAimForWeapon = async (weapon) => {
+                    // Check for existing aim effect for this weapon
+                    const existingAim = actor.effects.find(e =>
+                        e.flags?.uesrpg3ev4?.aimWeaponUuid === weapon.uuid
+                    )
 
-                ui.notifications.info(`Aim bonus: +${newBonus}`)
+                    let currentBonus = 0
+                    if (existingAim) {
+                        // Get current bonus from existing effect
+                        const change = existingAim.changes?.find(c => c.key === 'system.modifiers.combat.attackTN.total')
+                        currentBonus = parseInt(change?.value || 0)
+                        // Delete existing aim effect
+                        await existingAim.delete()
+                    }
+
+                    // Increment bonus by 10 (stacking: +10, +20, +30, etc.)
+                    const newBonus = currentBonus + 10
+
+                    // Create new aim effect with system's Aim effect structure
+                    await actor.createEmbeddedDocuments('ActiveEffect', [{
+                        name: `Aiming (${weapon.name})`,
+                        icon: 'icons/svg/target.svg',
+                        flags: {
+                            core: { statusId: 'aim' },
+                            uesrpg3ev4: {
+                                aimWeaponUuid: weapon.uuid,
+                                aimBonus: newBonus
+                            }
+                        },
+                        changes: [{
+                            key: 'system.modifiers.combat.attackTN.total',
+                            mode: 2, // ADD mode
+                            value: newBonus
+                        }]
+                    }])
+
+                    ui.notifications.info(`Aiming with ${weapon.name}: +${newBonus} bonus`)
+                }
+
+                // If multiple ranged weapons, show selection dialog
+                if (rangedWeapons.length > 1) {
+                    const weaponList = rangedWeapons.map(weapon =>
+                        `<option value="${weapon.id}">${weapon.name}</option>`
+                    ).join('')
+
+                    const content = `
+                        <form>
+                            <div class="form-group">
+                                <label>Select Weapon to Aim:</label>
+                                <select id="weapon-select" style="width: 100%;">
+                                    ${weaponList}
+                                </select>
+                            </div>
+                        </form>
+                    `
+
+                    new Dialog({
+                        title: 'Aim',
+                        content,
+                        buttons: {
+                            aim: {
+                                label: 'Aim',
+                                callback: async (html) => {
+                                    const weaponId = html.find('#weapon-select').val()
+                                    const weapon = actor.items.get(weaponId)
+                                    if (weapon) {
+                                        await applyAimForWeapon(weapon)
+                                    }
+                                }
+                            },
+                            cancel: {
+                                label: 'Cancel'
+                            }
+                        },
+                        default: 'aim'
+                    }).render(true)
+                } else {
+                    // Only one ranged weapon, aim with it directly
+                    await applyAimForWeapon(rangedWeapons[0])
+                }
             } catch (error) {
                 console.error('Error handling aim action:', error)
                 ui.notifications.error('Failed to apply aim effect')
@@ -392,21 +464,24 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          */
         async #handleDefensiveStanceAction (event, actor) {
             try {
-                // Apply defensive stance effect (+10 defensive tests, attack limit 0)
+                // Get existing defensive stance effects and count them for stacking
+                const existingStances = actor.effects.filter(e =>
+                    e.flags?.core?.statusId === 'defensive-stance' ||
+                    e.name === 'Defensive Stance'
+                )
+                const stackCount = existingStances.length
+                const newBonus = (stackCount + 1) * 10
+
+                // Apply defensive stance effect (+10 defensive tests per stack, stackable)
                 await actor.createEmbeddedDocuments('ActiveEffect', [{
                     name: 'Defensive Stance',
                     icon: 'icons/svg/shield.svg',
                     flags: { core: { statusId: 'defensive-stance' } },
                     changes: [
                         {
-                            key: 'system.defensiveBonus',
-                            mode: 2,
+                            key: 'system.modifiers.combat.defenseTN.total',
+                            mode: 2, // ADD mode for proper stacking
                             value: 10
-                        },
-                        {
-                            key: 'system.attacksThisRound.max',
-                            mode: 5,
-                            value: 0
                         }
                     ],
                     duration: { turns: 1 }
@@ -414,7 +489,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
                 ChatMessage.create({
                     speaker: ChatMessage.getSpeaker({ actor }),
-                    content: `<strong>${actor.name}</strong> takes a <strong>Defensive Stance</strong> (+10 to defensive tests, cannot attack)!`
+                    content: `<strong>${actor.name}</strong> takes a <strong>Defensive Stance</strong> (+${newBonus} to defensive tests)!`
                 })
             } catch (error) {
                 console.error('Error handling defensive stance action:', error)
@@ -457,8 +532,24 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          */
         async #handleSpecialAction (event, actor, actionId) {
             try {
+                // Special case for 'arise' - just post chat message
+                if (actionId.toLowerCase() === 'arise') {
+                    // Use system's executeSpecialAction if available
+                    if (typeof actor.executeSpecialAction === 'function') {
+                        await actor.executeSpecialAction('arise')
+                    } else {
+                        // Fallback to chat message
+                        ChatMessage.create({
+                            speaker: ChatMessage.getSpeaker({ actor }),
+                            content: `<strong>${actor.name}</strong> performs <strong>Arise</strong>!`
+                        })
+                    }
+                    return
+                }
+
+                // For other special actions, use opposed workflow
                 // Get target token if one is selected
-                const targetToken = canvas.tokens.controlled.find(t => t.id !== this.token?.id) || 
+                const targetToken = canvas.tokens.controlled.find(t => t.id !== this.token?.id) ||
                                    Array.from(canvas.tokens.placeables.values()).find(t => t.isTargeted)
 
                 // Dynamically import SkillOpposedWorkflow from system
@@ -494,7 +585,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
             try {
                 // Get target token if one is selected
-                const targetToken = canvas.tokens.controlled.find(t => t.id !== this.token?.id) || 
+                const targetToken = canvas.tokens.controlled.find(t => t.id !== this.token?.id) ||
                                    Array.from(canvas.tokens.placeables.values()).find(t => t.isTargeted)
 
                 // Dynamically import SkillOpposedWorkflow from system
@@ -585,8 +676,11 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 return weapon.sheet.render(true)
             }
 
-            // Left-click: open sheet (weapon damage is rolled through attack workflow)
-            weapon.sheet.render(true)
+            // Left-click: toggle equipped status
+            const equipped = weapon.system?.equipped || false
+            await weapon.update({ 'system.equipped': !equipped })
+
+            ui.notifications.info(`${weapon.name} ${!equipped ? 'equipped' : 'unequipped'}`)
         }
 
         /**
@@ -618,8 +712,20 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const item = actor.items.get(actionId)
             if (!item) return
 
-            // Open item sheet
-            item.sheet.render(true)
+            // Right-click: open sheet
+            if (this.isRenderItem()) {
+                return item.sheet.render(true)
+            }
+
+            // Left-click: toggle equipped if item has equipped property, otherwise open sheet
+            if (Object.prototype.hasOwnProperty.call(item.system || {}, 'equipped')) {
+                const equipped = item.system.equipped || false
+                await item.update({ 'system.equipped': !equipped })
+                ui.notifications.info(`${item.name} ${!equipped ? 'equipped' : 'unequipped'}`)
+            } else {
+                // No equipped property, just open sheet
+                item.sheet.render(true)
+            }
         }
 
         /**
@@ -633,8 +739,20 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const ammo = actor.items.get(actionId)
             if (!ammo) return
 
-            // Open sheet
-            ammo.sheet.render(true)
+            // Right-click: open sheet
+            if (this.isRenderItem()) {
+                return ammo.sheet.render(true)
+            }
+
+            // Left-click: toggle equipped if item has equipped property, otherwise open sheet
+            if (Object.prototype.hasOwnProperty.call(ammo.system || {}, 'equipped')) {
+                const equipped = ammo.system.equipped || false
+                await ammo.update({ 'system.equipped': !equipped })
+                ui.notifications.info(`${ammo.name} ${!equipped ? 'equipped' : 'unequipped'}`)
+            } else {
+                // No equipped property, just open sheet
+                ammo.sheet.render(true)
+            }
         }
 
         /**
@@ -649,17 +767,17 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             if (!spell) return
 
             try {
-                // Get target token if one is selected
-                const targetToken = canvas.tokens.controlled.find(t => t.id !== this.token?.id) || 
+                // Get target token if one is selected (optional for unopposed spells)
+                const targetToken = canvas.tokens.controlled.find(t => t.id !== this.token?.id) ||
                                    Array.from(canvas.tokens.placeables.values()).find(t => t.isTargeted)
 
                 // Dynamically import MagicOpposedWorkflow from system
                 const { MagicOpposedWorkflow } = await import('/systems/uesrpg-3ev4/module/magic/opposed-workflow.js')
 
-                // Create pending magic opposed workflow
+                // Create pending magic opposed workflow - target is now optional
                 await MagicOpposedWorkflow.createPending({
                     attackerTokenUuid: this.token?.document?.uuid || actor.uuid,
-                    defenderTokenUuid: targetToken?.document?.uuid || null,
+                    defenderTokenUuid: targetToken?.document?.uuid || null, // null is OK for unopposed spells
                     spellUuid: spell.uuid
                 })
             } catch (error) {
@@ -680,8 +798,20 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const feature = actor.items.get(actionId)
             if (!feature) return
 
-            // Open feature sheet
-            feature.sheet.render(true)
+            // Right-click: open sheet
+            if (this.isRenderItem()) {
+                return feature.sheet.render(true)
+            }
+
+            // Left-click: post description to chat
+            const description = feature.system?.description || ''
+            ChatMessage.create({
+                speaker: ChatMessage.getSpeaker({ actor }),
+                content: `
+                    <h3>${feature.name}</h3>
+                    <p>${description}</p>
+                `
+            })
         }
 
         /**

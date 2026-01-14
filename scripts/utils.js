@@ -92,8 +92,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @returns {object}     Object with current and max AP
          */
         static getActionPoints (actor) {
-            const current = Utils.parseNumber(actor?.system?.actionPoints?.value, 0)
-            const max = Utils.parseNumber(actor?.system?.actionPoints?.max, 0)
+            const current = Utils.parseNumber(actor?.system?.combat?.actionPoints?.current, 0)
+            const max = Utils.parseNumber(actor?.system?.combat?.actionPoints?.max, 0)
             return { current, max }
         }
 
@@ -103,8 +103,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @returns {object}     Object with current and limit
          */
         static getAttacksThisRound (actor) {
-            const current = Utils.parseNumber(actor?.system?.attacksThisRound?.value, 0)
-            const limit = Utils.parseNumber(actor?.system?.attacksThisRound?.max, 2)
+            const current = Utils.parseNumber(actor?.system?.combat?.attacksThisRound?.current, 0)
+            const limit = Utils.parseNumber(actor?.system?.combat?.attacksThisRound?.limit, 2)
             return { current, limit }
         }
     }
