@@ -15,7 +15,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
         async handleActionClick (event, encodedValue) {
             const [actionTypeId, actionId] = encodedValue.split('|')
 
-            const renderable = ['skill', 'magicSkill', 'combatStyle', 'weapon', 'armor', 'item', 'ammunition', 'spell', 'talent', 'trait', 'power']
+            const renderable = ['skill', 'profession', 'magicSkill', 'combatStyle', 'weapon', 'armor', 'item', 'ammunition', 'spell', 'talent', 'trait', 'power']
 
             if (renderable.includes(actionTypeId) && this.isRenderItem()) {
                 return this.doRenderItem(this.actor, actionId)
@@ -101,6 +101,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             case 'skill':
                 await this.#handleSkillAction(event, actor, actionId)
                 break
+            case 'profession':
+                await this.#handleProfessionAction(event, actor, actionId)
+                break
             case 'magicSkill':
                 await this.#handleMagicSkillAction(event, actor, actionId)
                 break
@@ -182,103 +185,28 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {object} actor The actor
          */
         async #handleAimAction (event, actor) {
-            try {
-                // Find all equipped ranged weapons
-                const rangedWeapons = actor.items.filter(item =>
-                    item.type === 'weapon' &&
-                    item.system?.equipped &&
-                    item.system?.attackMode === 'ranged'
-                )
+            // Call the system's Aim workflow directly from actor sheet
+            const fakeEvent = new MouseEvent('click', {
+                bubbles: true,
+                cancelable: true,
+                view: window
+            })
 
-                if (rangedWeapons.length === 0) {
-                    ui.notifications.warn('No ranged weapon equipped to aim with')
-                    return
-                }
-
-                // Function to apply aim effect for a specific weapon
-                const applyAimForWeapon = async (weapon) => {
-                    // Check for existing aim effect for this weapon
-                    const existingAim = actor.effects.find(e =>
-                        e.flags?.uesrpg3ev4?.aimWeaponUuid === weapon.uuid
-                    )
-
-                    let currentBonus = 0
-                    if (existingAim) {
-                        // Get current bonus from existing effect
-                        const change = existingAim.changes?.find(c => c.key === 'system.modifiers.combat.attackTN.total')
-                        currentBonus = parseInt(change?.value || 0)
-                        // Delete existing aim effect
-                        await existingAim.delete()
+            Object.defineProperty(fakeEvent, 'currentTarget', {
+                writable: false,
+                value: {
+                    dataset: {
+                        action: 'aim',
+                        label: 'Aim'
                     }
-
-                    // Increment bonus by 10 (stacking: +10, +20, +30, etc.)
-                    const newBonus = currentBonus + 10
-
-                    // Create new aim effect with system's Aim effect structure
-                    await actor.createEmbeddedDocuments('ActiveEffect', [{
-                        name: `Aiming (${weapon.name})`,
-                        icon: 'icons/svg/target.svg',
-                        flags: {
-                            core: { statusId: 'aim' },
-                            uesrpg3ev4: {
-                                aimWeaponUuid: weapon.uuid,
-                                aimBonus: newBonus
-                            }
-                        },
-                        changes: [{
-                            key: 'system.modifiers.combat.attackTN.total',
-                            mode: 2, // ADD mode
-                            value: newBonus
-                        }]
-                    }])
-
-                    ui.notifications.info(`Aiming with ${weapon.name}: +${newBonus} bonus`)
                 }
+            })
 
-                // If multiple ranged weapons, show selection dialog
-                if (rangedWeapons.length > 1) {
-                    const weaponList = rangedWeapons.map(weapon =>
-                        `<option value="${weapon.id}">${weapon.name}</option>`
-                    ).join('')
-
-                    const content = `
-                        <form>
-                            <div class="form-group">
-                                <label>Select Weapon to Aim:</label>
-                                <select id="weapon-select" style="width: 100%;">
-                                    ${weaponList}
-                                </select>
-                            </div>
-                        </form>
-                    `
-
-                    new Dialog({
-                        title: 'Aim',
-                        content,
-                        buttons: {
-                            aim: {
-                                label: 'Aim',
-                                callback: async (html) => {
-                                    const weaponId = html.find('#weapon-select').val()
-                                    const weapon = actor.items.get(weaponId)
-                                    if (weapon) {
-                                        await applyAimForWeapon(weapon)
-                                    }
-                                }
-                            },
-                            cancel: {
-                                label: 'Cancel'
-                            }
-                        },
-                        default: 'aim'
-                    }).render(true)
-                } else {
-                    // Only one ranged weapon, aim with it directly
-                    await applyAimForWeapon(rangedWeapons[0])
-                }
-            } catch (error) {
-                console.error('Error handling aim action:', error)
-                ui.notifications.error('Failed to apply aim effect')
+            const sheet = actor.sheet
+            if (sheet && typeof sheet._onCombatQuickAction === 'function') {
+                await sheet._onCombatQuickAction(fakeEvent)
+            } else {
+                ui.notifications.warn('Aim action not available')
             }
         }
 
@@ -582,24 +510,73 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const skill = actor.items.get(actionId)
             if (!skill) return
 
-            try {
-                // Get target token if one is selected
-                const targetToken = canvas.tokens.controlled.find(t => t.id !== this.token?.id) ||
-                                   Array.from(canvas.tokens.placeables.values()).find(t => t.isTargeted)
+            // Right-click: open sheet
+            if (this.isRenderItem()) {
+                return skill.sheet.render(true)
+            }
 
-                // Dynamically import SkillOpposedWorkflow from system
-                const { SkillOpposedWorkflow } = await import('/systems/uesrpg-3ev4/module/skills/opposed-workflow.js')
+            // Left-click: Call the system's skill roll directly (works with or without target)
+            // The system's SimpleActorSheet._onSkillRoll handles both opposed and unopposed
+            const fakeEvent = new MouseEvent('click', {
+                bubbles: true,
+                cancelable: true,
+                view: window,
+                shiftKey: event?.shiftKey || false
+            })
 
-                // Create pending skill opposed workflow
-                await SkillOpposedWorkflow.createPending({
-                    attackerTokenUuid: this.token?.document?.uuid || actor.uuid,
-                    defenderTokenUuid: targetToken?.document?.uuid || null,
-                    attackerSkillUuid: skill.uuid
-                })
-            } catch (error) {
-                console.error('Error rolling skill:', error)
-                // Fallback to opening skill sheet
+            Object.defineProperty(fakeEvent, 'currentTarget', {
+                writable: false,
+                value: {
+                    closest: () => ({ dataset: { itemId: actionId } })
+                }
+            })
+
+            // Call the actor sheet's skill roll method directly
+            const sheet = actor.sheet
+            if (sheet && typeof sheet._onSkillRoll === 'function') {
+                await sheet._onSkillRoll(fakeEvent)
+            } else {
+                // Fallback: open sheet
                 skill.sheet.render(true)
+            }
+        }
+
+        /**
+         * Handle profession action
+         * @private
+         * @param {object} event    The event
+         * @param {object} actor    The actor
+         * @param {string} actionId The action id
+         */
+        async #handleProfessionAction (event, actor, actionId) {
+            // Right-click: show profession details
+            if (this.isRenderItem()) {
+                const profValue = actor.system?.professions?.[actionId] || 0
+                const spec = actor.system?.skills?.[actionId]?.specialization || ''
+                const name = spec || actionId.replace('profession', 'Profession ')
+
+                ChatMessage.create({
+                    speaker: ChatMessage.getSpeaker({ actor }),
+                    content: `<h3>${name}</h3><p>Value: ${profValue}%</p>`
+                })
+                return
+            }
+
+            // Left-click: Call sheet's profession roll
+            const fakeEvent = new MouseEvent('click', {
+                bubbles: true,
+                cancelable: true,
+                view: window
+            })
+
+            Object.defineProperty(fakeEvent, 'currentTarget', {
+                writable: false,
+                value: { id: actionId }
+            })
+
+            const sheet = actor.sheet
+            if (sheet && typeof sheet._onProfessionsRoll === 'function') {
+                await sheet._onProfessionsRoll(fakeEvent)
             }
         }
 
