@@ -287,7 +287,6 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          */
         async #buildSkills () {
             await this.#buildCoreSkills()
-            await this.#buildMagicSkills()
             await this.#buildCombatStyles()
         }
 
@@ -302,19 +301,44 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const groupData = { id: groupId, type: 'system' }
             const actions = []
 
-            for (const [itemId, itemData] of this.#getItemsIterator()) {
-                if (!itemData || itemData.type !== 'skill') continue
-                if (itemData.system?.category === 'magic') continue // Magic skills in separate group
+            // For NPCs, use professions instead of skills
+            if (this.actorType === 'NPC') {
+                // NPCs use professions which are stored differently
+                for (const [itemId, itemData] of this.#getItemsIterator()) {
+                    if (!itemData || itemData.type !== 'profession') continue
 
-                const tn = itemData.system?.tn || 0
-                const name = itemData.name
+                    const ranks = itemData.system?.ranks || 0
+                    const bonus = itemData.system?.bonus || 0
+                    const attributeBonus = itemData.system?.attributeBonus || 0
+                    const tn = (ranks * 10) + bonus + attributeBonus
+                    const name = itemData.name
 
-                actions.push({
-                    id: itemId,
-                    name,
-                    encodedValue: ['skill', itemId].join(this.delimiter),
-                    info1: { text: `${tn}%` }
-                })
+                    actions.push({
+                        id: itemId,
+                        name,
+                        encodedValue: ['skill', itemId].join(this.delimiter),
+                        info1: { text: `${tn}%` }
+                    })
+                }
+            } else {
+                // For PCs, use skills and compute TN correctly
+                for (const [itemId, itemData] of this.#getItemsIterator()) {
+                    if (!itemData || itemData.type !== 'skill') continue
+                    if (itemData.system?.category === 'magic') continue // Magic skills in separate group
+
+                    const ranks = itemData.system?.ranks || 0
+                    const bonus = itemData.system?.bonus || 0
+                    const attributeBonus = itemData.system?.attributeBonus || 0
+                    const tn = (ranks * 10) + bonus + attributeBonus
+                    const name = itemData.name
+
+                    actions.push({
+                        id: itemId,
+                        name,
+                        encodedValue: ['skill', itemId].join(this.delimiter),
+                        info1: { text: `${tn}%` }
+                    })
+                }
             }
 
             if (actions.length > 0) {
@@ -337,14 +361,18 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 if (!itemData || itemData.type !== 'skill') continue
                 if (itemData.system?.category !== 'magic') continue
 
-                const rank = itemData.system?.rank || 0
+                const ranks = itemData.system?.ranks || 0
+                const bonus = itemData.system?.bonus || 0
+                const attributeBonus = itemData.system?.attributeBonus || 0
+                const tn = (ranks * 10) + bonus + attributeBonus
                 const name = itemData.name
 
                 actions.push({
                     id: itemId,
                     name,
                     encodedValue: ['magicSkill', itemId].join(this.delimiter),
-                    info1: { text: `Rank ${rank}` }
+                    info1: { text: `Rank ${ranks}` },
+                    info2: { text: `${tn}%` }
                 })
             }
 
@@ -422,7 +450,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                     id: itemId,
                     name,
                     encodedValue: ['weapon', itemId].join(this.delimiter),
-                    info1: { text: damage }
+                    info1: { text: damage },
+                    cssClass: equipped ? 'active' : ''
                 })
             }
 
@@ -476,12 +505,14 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 if (!itemData || itemData.type !== 'item') continue
                 if (itemData.type === 'spell') continue // Exclude spells
 
+                const equipped = itemData.system?.equipped || false
                 const name = itemData.name
 
                 actions.push({
                     id: itemId,
                     name,
-                    encodedValue: ['item', itemId].join(this.delimiter)
+                    encodedValue: ['item', itemId].join(this.delimiter),
+                    cssClass: equipped ? 'active' : ''
                 })
             }
 
@@ -503,13 +534,15 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 if (!itemData || itemData.type !== 'ammunition') continue
 
                 const quantity = itemData.system?.quantity || 0
+                const equipped = itemData.system?.equipped || false
                 const name = itemData.name
 
                 actions.push({
                     id: itemId,
                     name,
                     encodedValue: ['ammunition', itemId].join(this.delimiter),
-                    info1: { text: `x${quantity}` }
+                    info1: { text: `x${quantity}` },
+                    cssClass: equipped ? 'active' : ''
                 })
             }
 
@@ -524,6 +557,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          */
         async #buildSpells () {
             if (this.#getItemsCount() === 0) return
+
+            // Add magic skills at the top of spells category
+            await this.#buildMagicSkills()
 
             // Group spells by school
             const spellsBySchool = new Map()
