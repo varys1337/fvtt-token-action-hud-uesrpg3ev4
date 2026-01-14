@@ -391,35 +391,28 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {object} actor The actor
          */
         async #handleDefensiveStanceAction (event, actor) {
-            try {
-                // Apply defensive stance effect (+10 defensive tests per stack, stackable)
-                await actor.createEmbeddedDocuments('ActiveEffect', [{
-                    name: 'Defensive Stance',
-                    icon: 'icons/svg/shield.svg',
-                    flags: { core: { statusId: 'defensive-stance' } },
-                    changes: [
-                        {
-                            key: 'system.modifiers.combat.defenseTN.total',
-                            mode: 2, // ADD mode for proper stacking
-                            value: 10
-                        }
-                    ],
-                    duration: { turns: 1 }
-                }])
+            // Call the system's Defensive Stance workflow directly from actor sheet
+            const fakeEvent = new MouseEvent('click', {
+                bubbles: true,
+                cancelable: true,
+                view: window
+            })
 
-                // Count total stances after adding the new one
-                const totalStances = actor.effects.filter(e =>
-                    e.flags?.core?.statusId === 'defensive-stance' ||
-                    e.name === 'Defensive Stance'
-                ).length
-                const totalBonus = totalStances * 10
+            Object.defineProperty(fakeEvent, 'currentTarget', {
+                writable: false,
+                value: {
+                    dataset: {
+                        action: 'defensive-stance',
+                        label: 'Defensive Stance'
+                    }
+                }
+            })
 
-                ChatMessage.create({
-                    speaker: ChatMessage.getSpeaker({ actor }),
-                    content: `<strong>${actor.name}</strong> takes a <strong>Defensive Stance</strong> (total: +${totalBonus} to defensive tests)!`
-                })
-            } catch (error) {
-                console.error('Error handling defensive stance action:', error)
+            const sheet = actor.sheet
+            if (sheet && typeof sheet._onCombatQuickAction === 'function') {
+                await sheet._onCombatQuickAction(fakeEvent)
+            } else {
+                ui.notifications.warn('Defensive Stance action not available')
             }
         }
 
@@ -591,16 +584,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {string} actionId The action id
          */
         async #handleMagicSkillAction (event, actor, actionId) {
-            const skill = actor.items.get(actionId)
-            if (!skill) return
-
-            // Right-click or render: open sheet
-            if (this.isRenderItem()) {
-                return skill.sheet.render(true)
-            }
-
-            // Left-click: open sheet (magic skills don't roll directly)
-            skill.sheet.render(true)
+            // Magic skills are just skill items, so use the skill handler
+            await this.#handleSkillAction(event, actor, actionId)
         }
 
         /**
