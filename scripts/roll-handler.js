@@ -549,11 +549,14 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {string} actionId The action id
          */
         async #handleProfessionAction (event, actor, actionId) {
+            // Strip 'prof-' prefix if present
+            const profKey = actionId.startsWith('prof-') ? actionId.substring(5) : actionId
+
             // Right-click: show profession details
             if (this.isRenderItem()) {
-                const profValue = actor.system?.professions?.[actionId] || 0
-                const spec = actor.system?.skills?.[actionId]?.specialization || ''
-                const name = spec || actionId.replace('profession', 'Profession ')
+                const profValue = actor.system?.professions?.[profKey] || 0
+                const spec = actor.system?.skills?.[profKey]?.specialization || ''
+                const name = spec || profKey.replace('profession', 'Profession ')
 
                 ChatMessage.create({
                     speaker: ChatMessage.getSpeaker({ actor }),
@@ -571,7 +574,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
             Object.defineProperty(fakeEvent, 'currentTarget', {
                 writable: false,
-                value: { id: actionId }
+                value: { id: profKey }
             })
 
             const sheet = actor.sheet

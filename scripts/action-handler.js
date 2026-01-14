@@ -50,9 +50,6 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             this.actors = (!this.actor) ? this._getActors() : [this.actor]
             this.actorType = this.actor?.type
 
-            // Settings
-            this.displayUnequipped = Utils.getSetting('displayUnequipped')
-
             // Set items variable - ensure it's always initialized
             if (this.actor?.items) {
                 let items = this.actor.items
@@ -295,8 +292,6 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @private
          */
         async #buildCoreSkills () {
-            if (this.#getItemsCount() === 0 && this.actorType === 'Player Character') return
-
             const groupId = 'coreSkills'
             const groupData = { id: groupId, type: 'system' }
             const actions = []
@@ -326,6 +321,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 }
             } else {
                 // For PCs, use skill items
+                if (this.#getItemsCount() === 0) return
+
                 for (const [itemId, itemData] of this.#getItemsIterator()) {
                     if (!itemData || itemData.type !== 'skill') continue
                     if (itemData.system?.category === 'magic') continue
