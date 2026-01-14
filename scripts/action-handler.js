@@ -201,6 +201,26 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 encodedValue: ['useItem', 'use'].join(this.delimiter)
             })
 
+            // Reload Weapon (only if ranged weapon equipped)
+            const rangedWeapon = this.actor.items?.find(i =>
+                i.type === 'weapon' &&
+                i.system?.equipped === true &&
+                i.system?.attackMode === 'ranged'
+            )
+
+            if (rangedWeapon) {
+                const reloadState = rangedWeapon.system?.reloadState ?? {}
+                const needsReload = reloadState.requiresReload && !reloadState.isLoaded
+                const reloadCost = Number(reloadState.reloadAPCost ?? 0)
+
+                actions.push({
+                    id: 'reload-weapon',
+                    name: needsReload ? `Reload (${reloadCost} AP)` : 'Reload Weapon',
+                    encodedValue: ['secondaryAction', 'reload-weapon'].join(this.delimiter),
+                    cssClass: needsReload ? 'active' : ''
+                })
+            }
+
             if (actions.length > 0) {
                 this.addActions(actions, groupData)
             }
@@ -367,6 +387,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @private
          */
         async #buildMagicSkills () {
+            // Only for PCs - magic skills are item type "magicSkill"
+            if (this.actorType !== 'Player Character') return
             if (this.#getItemsCount() === 0) return
 
             const groupId = 'magicSkills'
@@ -374,10 +396,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const actions = []
 
             for (const [itemId, itemData] of this.#getItemsIterator()) {
-                if (!itemData || itemData.type !== 'skill') continue
-                if (itemData.system?.category !== 'magic') continue
+                if (!itemData || itemData.type !== 'magicSkill') continue
 
-                // Use pre-computed value
                 const tn = itemData.system?.value || 0
                 const name = itemData.name
 

@@ -130,6 +130,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             case 'power':
                 await this.#handleFeatureAction(event, actor, actionId)
                 break
+            case 'secondaryAction':
+                await this.#handleSecondaryActionAction(event, actor, actionId)
+                break
             case 'utility':
                 await this.#handleUtilityAction(token, actionId)
                 break
@@ -584,8 +587,53 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {string} actionId The action id
          */
         async #handleMagicSkillAction (event, actor, actionId) {
-            // Magic skills are just skill items, so use the skill handler
+            // Magic skills use the same roll handler as regular skills
             await this.#handleSkillAction(event, actor, actionId)
+        }
+
+        /**
+         * Handle secondary action
+         * @private
+         * @param {object} event    The event
+         * @param {object} actor    The actor
+         * @param {string} actionId The action id
+         */
+        async #handleSecondaryActionAction (event, actor, actionId) {
+            if (actionId === 'reload-weapon') {
+                await this.#handleReloadWeaponAction(event, actor)
+            }
+        }
+
+        /**
+         * Handle reload weapon action
+         * @private
+         * @param {object} event The event
+         * @param {object} actor The actor
+         */
+        async #handleReloadWeaponAction (event, actor) {
+            // Call the actor sheet's reload workflow directly
+            const fakeEvent = new MouseEvent('click', {
+                bubbles: true,
+                cancelable: true,
+                view: window
+            })
+
+            Object.defineProperty(fakeEvent, 'currentTarget', {
+                writable: false,
+                value: {
+                    dataset: {
+                        action: 'reload-weapon',
+                        label: 'Reload Weapon'
+                    }
+                }
+            })
+
+            const sheet = actor.sheet
+            if (sheet && typeof sheet._onCombatQuickAction === 'function') {
+                await sheet._onCombatQuickAction(fakeEvent)
+            } else {
+                ui.notifications.warn('Reload Weapon action not available')
+            }
         }
 
         /**
