@@ -387,14 +387,13 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @private
          */
         async #buildMagicSkills () {
+            // Only for PCs - magic skills are item type "magicSkill"
+            if (this.actorType !== 'Player Character') return
             if (this.#getItemsCount() === 0) return
 
             const groupId = 'magicSkills'
             const groupData = { id: groupId, type: 'system' }
             const actions = []
-
-            // Only for PCs - magic skills are item type "magicSkill"
-            if (this.actorType !== 'Player Character') return
 
             for (const [itemId, itemData] of this.#getItemsIterator()) {
                 if (!itemData || itemData.type !== 'magicSkill') continue
