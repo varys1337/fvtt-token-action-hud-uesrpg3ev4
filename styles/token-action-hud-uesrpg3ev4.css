@@ -30,20 +30,15 @@
 }
 
 #token-action-hud {
-    align-items: center !important;
+    align-items: center;
     border-radius: var(--tah-border-radius);
-    display: flex !important;
-    flex-direction: row !important;
+    display: flex;
+    flex-direction: row;
     height: auto;
-    position: fixed !important;
+    left: 150px;
+    top: 80px;
     width: auto;
     z-index: 100;
-    /* Default bottom position - centered horizontally */
-    bottom: 60px !important;
-    left: 50% !important;
-    transform: translateX(-50%) !important;
-    top: auto !important;
-    right: auto !important;
 }
 
 #token-action-hud [class*="icon-"] {
@@ -67,11 +62,9 @@
     display: none !important;
 }
 
-/* Show control buttons - always visible when unlocked, on hover when locked */
 #token-action-hud:hover #tah-collapse-hud,
-#token-action-hud:hover > #tah-buttons,
-#token-action-hud:not(.tah-locked) > #tah-buttons {
-    display: flex !important;
+#token-action-hud:hover > #tah-buttons {
+    display: flex;
 }
 
 #tah-collapse-hud,
@@ -83,13 +76,6 @@
     height: var(--tah-button-height);
     position: relative;
     z-index: 1;
-    margin-right: 5px;
-    flex-shrink: 0;
-}
-
-/* Always show buttons when HUD is unlocked */
-#token-action-hud:not(.tah-locked) > #tah-buttons {
-    display: flex !important;
 }
 
 #tah-collapse-expand {
@@ -262,42 +248,21 @@
     font-size: var(--font-size-16);
 }
 
-/* Force horizontal layout for tab groups */
 #tah-groups,
 .tah-tab-groups {
-    display: flex !important;
-    flex-direction: row !important;
+    display: flex;
     gap: var(--tah-gap);
     position: relative;
-    margin: 0;
-    padding: 0;
-    align-items: center !important;
-    flex-wrap: nowrap !important;
 }
 
 .tah-tab-groups {
     width: max-content;
-    flex-direction: row !important;
-    display: flex !important;
 }
 
-.tah-tab-group {
-    display: flex !important;
-    position: relative;
-    margin: 0;
-    padding: 0;
-    align-items: center !important;
-    flex-direction: column !important;
-    flex-shrink: 0;
-    /* Each tab button is vertical, but tabs are arranged horizontally */
-}
-
+.tah-tab-group,
 .tah-group {
     display: flex;
     position: relative;
-    margin: 0;
-    padding: 0;
-    align-items: flex-start;
 }
 
 .tah-groups-container {
@@ -311,22 +276,21 @@
 }
 
 .tah-tab-group > .tah-groups-container.expand-down > .tah-groups {
-    flex-direction: row !important;
+    flex-direction: column;
     left: -10px;
     padding: 3px 10px 10px 10px;
     position: relative;
 }
 
 .tah-tab-group > .tah-groups-container.expand-up > .tah-groups {
-    flex-direction: row !important;
+    flex-direction: column;
     left: -10px;
     padding: 10px 10px 3px 10px;
     position: relative;
 }
 
-/* Force horizontal for expand-up groups */
 #tah-groups > .tah-tab-group > .tah-groups-container.expand-up > .tah-groups {
-    flex-direction: row !important;
+    flex-direction: column-reverse;
 }
 
 .tah-tab-group > .tah-groups-container.expand-down {
@@ -335,18 +299,16 @@
 }
 
 .tah-tab-group > .tah-groups-container.expand-up {
-    bottom: calc(100% + 7px);
-    flex-direction: row !important;
+    bottom: calc(100% + 3px + -10px);
+    flex-direction: column-reverse;
     padding-bottom: 10px;
 }
 
-/* Force horizontal for list groups inside expanded tab groups */
 .tah-tab-group
     > .tah-groups-container.expand-up
     > .tah-groups
     > .tah-list-groups {
-    flex-direction: row !important;
-    display: flex !important;
+    flex-direction: column-reverse;
 }
 
 .tah-list-groups,
@@ -359,9 +321,6 @@
     flex-direction: column;
     display: flex;
     gap: var(--tah-gap);
-    margin: 0;
-    padding: 0;
-    position: relative;
 }
 
 .tah-list-groups .tah-list-groups {
@@ -372,32 +331,13 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
-    margin: 0;
-    padding: 0;
-    position: relative;
 }
 
-/* Groups inside tab groups should be horizontal when expanded */
-.tah-tab-groups .tah-groups,
-.tah-tab-group > .tah-groups-container > .tah-groups {
-    display: flex !important;
-    flex-direction: row !important;
-    gap: var(--tah-gap);
-    width: max-content;
-    margin: 0;
-    padding: 0;
-    position: relative;
-}
-
-/* Default groups (nested) remain column */
 .tah-groups {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     gap: var(--tah-gap);
     width: max-content;
-    margin: 0;
-    padding: 0;
-    position: relative;
 }
 
 .tah-groups.expand-down {
@@ -445,13 +385,9 @@
     font-size: var(--tah-font-size-10);
     gap: var(--tah-gap);
     letter-spacing: 0.1em;
-    line-height: 1.2;
+    line-height: 1;
     text-shadow: var(--tah-text-shadow);
     text-transform: uppercase;
-    margin: 0;
-    padding: 2px 0;
-    position: relative;
-    z-index: 1;
 }
 
 .tah-subtitle:hover {
@@ -544,151 +480,4 @@
 
 .tah-subtitle > .tah-icon > :is(.fa, .fas) {
     text-shadow: var(--tah-text-shadow);
-}
-
-/* UESRPG 3ev4 Specific Styles */
-
-/* Spell School Colors */
-.tah-style-uesrpg3ev4 [data-group-id="alterationSpells"] .tah-subtitle {
-    color: #4a9eff;
-}
-
-.tah-style-uesrpg3ev4 [data-group-id="conjurationSpells"] .tah-subtitle {
-    color: #9b59d0;
-}
-
-.tah-style-uesrpg3ev4 [data-group-id="destructionSpells"] .tah-subtitle {
-    color: #ff4444;
-}
-
-.tah-style-uesrpg3ev4 [data-group-id="illusionSpells"] .tah-subtitle {
-    color: #ff8fc7;
-}
-
-.tah-style-uesrpg3ev4 [data-group-id="mysticismSpells"] .tah-subtitle {
-    color: #00d4ff;
-}
-
-.tah-style-uesrpg3ev4 [data-group-id="restorationSpells"] .tah-subtitle {
-    color: #44ff44;
-}
-
-.tah-style-uesrpg3ev4 [data-group-id="otherSpells"] .tah-subtitle {
-    color: #888888;
-}
-
-/* Combat Action Group Colors */
-.tah-style-uesrpg3ev4 [data-group-id="primaryActions"] .tah-subtitle {
-    color: #ff6b6b;
-}
-
-.tah-style-uesrpg3ev4 [data-group-id="secondaryActions"] .tah-subtitle {
-    color: #ffd93d;
-}
-
-.tah-style-uesrpg3ev4 [data-group-id="reactions"] .tah-subtitle {
-    color: #6bcf7f;
-}
-
-.tah-style-uesrpg3ev4 [data-group-id="specialActions"] .tah-subtitle {
-    color: #9b8dff;
-}
-
-/* Resource Warning Styles */
-.tah-style-uesrpg3ev4 .tah-info1.tah-spotlight {
-    color: #ff6b6b;
-    font-weight: bold;
-}
-
-/* Active Combat Style Highlight */
-.tah-style-uesrpg3ev4 .tah-action-button.active {
-    background: #2a5a2abf;
-    box-shadow: 0 0 0 1px #44ff44, inset 0 0 10px #44ff4480;
-}
-
-/* Action Tracking Display */
-.tah-style-uesrpg3ev4 [data-group-id="actionTracking"] .tah-action-button {
-    min-width: 120px;
-}
-
-/* Equipped Item Indicator */
-.tah-style-uesrpg3ev4 [data-group-id="armor"] .tah-action-button.active {
-    border-left: 3px solid #44ff44;
-}
-
-/* Fix overlapping elements - ensure proper spacing */
-.tah-group > .tah-list-group {
-    margin-top: 0;
-    padding-top: 0;
-    position: relative;
-}
-
-.tah-group > .tah-list-group > .tah-subtitle {
-    margin-bottom: 4px;
-    padding-bottom: 2px;
-    display: block;
-    width: 100%;
-}
-
-.tah-group > .tah-list-group > .tah-groups {
-    margin-top: 0;
-    padding-top: 0;
-}
-
-/* Ensure actions don't overlap with subtitles */
-.tah-list-group > .tah-actions {
-    margin-top: 0;
-    padding-top: 0;
-    position: relative;
-    z-index: 0;
-}
-
-/* Fix tab group spacing */
-.tah-tab-group > .tah-groups-container {
-    margin: 0;
-    padding: 0;
-}
-
-.tah-tab-group > .tah-groups-container > .tah-groups {
-    margin: 0;
-    padding: 0;
-}
-
-/* CRITICAL: Force horizontal layout for all tab group containers */
-#token-action-hud #tah-groups,
-#token-action-hud .tah-tab-groups {
-    flex-direction: row !important;
-    display: flex !important;
-}
-
-/* Force horizontal layout for expanded groups */
-#token-action-hud .tah-tab-group > .tah-groups-container > .tah-groups,
-#token-action-hud .tah-tab-group > .tah-groups-container.expand-up > .tah-groups,
-#token-action-hud .tah-tab-group > .tah-groups-container.expand-down > .tah-groups {
-    flex-direction: row !important;
-}
-
-/* Ensure list groups inside expanded containers are also horizontal */
-#token-action-hud .tah-tab-group > .tah-groups-container > .tah-groups > .tah-list-groups {
-    flex-direction: row !important;
-    display: flex !important;
-}
-
-/* FINAL FIX: Force horizontal layout for tab groups - highest specificity */
-#token-action-hud #tah-groups.tah-tab-groups,
-#token-action-hud > #tah-groups.tah-tab-groups,
-#token-action-hud .tah-tab-groups {
-    display: flex !important;
-    flex-direction: row !important;
-    flex-wrap: nowrap !important;
-    align-items: flex-start !important;
-}
-
-/* Each tab group is a vertical button, but tabs are arranged horizontally */
-#token-action-hud .tah-tab-groups > .tah-tab-group {
-    display: flex !important;
-    flex-direction: column !important;
-    flex-shrink: 0 !important;
-    margin: 0 !important;
-    padding: 0 !important;
 }
