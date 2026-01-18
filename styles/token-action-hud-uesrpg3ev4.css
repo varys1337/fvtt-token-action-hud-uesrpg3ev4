@@ -191,6 +191,13 @@
     min-width: min-content;
 }
 
+/* AP tracker category button (non-interactive, always visible among tabs) */
+.tah-ap-tracker {
+    pointer-events: none;
+    cursor: default;
+    opacity: 1;
+}
+
 .tah-group-button > :is(.fa, .fas) {
     font-size: 8px;
     position: absolute;
@@ -480,4 +487,70 @@
 
 .tah-subtitle > .tah-icon > :is(.fa, .fas) {
     text-shadow: var(--tah-text-shadow);
+}
+
+/* ------------------------------------------------------------------------- */
+/* Feature tooltips (contrast-safe)                                           */
+/* ------------------------------------------------------------------------- */
+
+/* The core HUD renders tooltips into Foundry's global #tooltip element.
+ * Ensure feature tooltips remain readable regardless of theme variables.
+ */
+#tooltip:has(.uesrpg-tah-tooltip) {
+    /* Normalize background across Foundry light/dark themes and avoid textured/transparent backdrops. */
+    background: rgba(18, 18, 22, 0.96) !important;
+    background-image: none !important;
+    border: 1px solid rgba(255, 255, 255, 0.12) !important;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55), 0 10px 28px rgba(0, 0, 0, 0.65) !important;
+    padding: 12px 14px !important;
+}
+
+#tooltip .uesrpg-tah-tooltip,
+#tooltip .uesrpg-tah-tooltip * {
+    color: #f2f2f2;
+}
+
+#tooltip .uesrpg-tah-tooltip {
+    line-height: 1.35;
+    max-width: 420px;
+}
+
+#tooltip .uesrpg-tah-tooltip-title {
+    font-weight: 700;
+    font-size: 14px;
+    text-align: right;
+    margin-bottom: 4px;
+}
+
+#tooltip .uesrpg-tah-tooltip-meta {
+    font-size: 12px;
+    opacity: 0.9;
+    text-align: right;
+}
+
+#tooltip .uesrpg-tah-tooltip-sep {
+    border: 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.15);
+    margin: 8px 0;
+}
+
+#tooltip .uesrpg-tah-tooltip-desc {
+    font-size: 13px;
+}
+
+#tooltip:has(.uesrpg-tah-tooltip) a {
+    color: #9b8dff;
+}
+
+#tooltip:has(.uesrpg-tah-tooltip) code {
+    background: rgba(255, 255, 255, 0.08);
+    padding: 0 0.2em;
+    border-radius: 3px;
+}
+
+/* Compact AP badge button shown within existing groups (no extra tab) */
+#token-action-hud .tah-action-button.uesrpg-ap-badge {
+    font-size: var(--font-size-11);
+    opacity: 0.85;
+    padding: 0 6px;
 }
