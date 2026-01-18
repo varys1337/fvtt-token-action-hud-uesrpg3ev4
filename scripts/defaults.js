@@ -65,17 +65,29 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 id: 'features',
                 name: coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.features'),
                 groups: [
-                    { ...groups.talents, nestId: 'features_talents' },
-                    { ...groups.traits, nestId: 'features_traits' },
-                    { ...groups.powers, nestId: 'features_powers' }
+                    { ...groups.talentsActivated, nestId: 'features_talentsActivated' },
+                    { ...groups.talentsPassive, nestId: 'features_talentsPassive' },
+                    { ...groups.traitsActivated, nestId: 'features_traitsActivated' },
+                    { ...groups.traitsPassive, nestId: 'features_traitsPassive' },
+                    { ...groups.powersActivated, nestId: 'features_powersActivated' },
+                    { ...groups.powersPassive, nestId: 'features_powersPassive' }
                 ]
             },
             {
-                nestId: 'actionTracking',
-                id: 'actionTracking',
-                name: coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.actionTracking'),
+                nestId: 'effects',
+                id: 'effects',
+                name: coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.effects'),
                 groups: [
-                    { ...groups.actionTracking, nestId: 'actionTracking_actionTracking' }
+                    { ...groups.statusEffects, nestId: 'effects_statusEffects' },
+                    { ...groups.activeEffects, nestId: 'effects_magicEffects' }
+                ]
+            },
+            {
+                nestId: 'actionsTracker',
+                id: 'actionsTracker',
+                name: coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.actionsTracker'),
+                groups: [
+                    { ...groups.actionsTracker, nestId: 'actionsTracker_actionsTracker' }
                 ]
             },
             {
