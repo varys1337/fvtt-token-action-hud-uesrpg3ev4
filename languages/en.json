@@ -7,12 +7,15 @@
       "spells": "Spells",
       "features": "Features",
       "actionTracking": "Action Tracking",
-      
+      "actionsTracker": "Actions",
+      "effects": "Effects",
+      "statusEffects": "Status Effects",
+      "magicEffects": "Magic Effects",
+      "activeEffects": "Active Effects",
       "primaryActions": "Primary Actions",
       "secondaryActions": "Secondary Actions",
       "reactions": "Reactions",
       "specialActions": "Special Actions",
-      
       "attackMelee": "Attack (Melee)",
       "attackRanged": "Attack (Ranged)",
       "aim": "Aim",
@@ -23,22 +26,18 @@
       "useItem": "Use Item",
       "defensiveStance": "Defensive Stance",
       "opportunityAttack": "Opportunity Attack",
-      
       "arise": "Arise",
       "shove": "Shove",
       "grapple": "Grapple",
       "trip": "Trip",
       "disarm": "Disarm",
-      
       "coreSkills": "Core Skills",
       "magicSkills": "Magic Skills",
       "combatStyles": "Combat Styles",
-      
       "weapons": "Weapons",
       "armor": "Armor",
       "items": "Items",
       "ammunition": "Ammunition",
-      
       "alterationSpells": "Alteration Spells",
       "conjurationSpells": "Conjuration Spells",
       "destructionSpells": "Destruction Spells",
@@ -46,14 +45,27 @@
       "mysticismSpells": "Mysticism Spells",
       "restorationSpells": "Restoration Spells",
       "otherSpells": "Other Spells",
-      
       "talents": "Talents",
       "traits": "Traits",
       "powers": "Powers",
-      
+      "talentsActivated": "Activated Talents",
+      "talentsPassive": "Passive Talents",
+      "traitsActivated": "Activated Traits",
+      "traitsPassive": "Passive Traits",
+      "powersActivated": "Activated Powers",
+      "powersPassive": "Passive Powers",
       "actionPoints": "Action Points",
+      "actionPointsSpent": "AP Spent",
       "attacksThisRound": "Attacks This Round",
-      
+      "attacksRemaining": "Attacks Remaining",
+      "reloadState": "Reload",
+      "reloadNone": "No Ranged",
+      "reloadNotRequired": "No Reload",
+      "reloadLoaded": "Loaded",
+      "reloadNeeded": "Needs Reload",
+      "upkeepConcentration": "Concentration",
+      "statusEffect": "Status Effect",
+      "activeEffect": "Active Effect",
       "attack": "Attack",
       "skill": "Skill",
       "magicSkill": "Magic Skill",
@@ -64,11 +76,27 @@
       "talent": "Talent",
       "trait": "Trait",
       "power": "Power",
-      
       "settings": {
         "displayUnequipped": {
           "hint": "Display unequipped weapons and armor in the HUD",
           "name": "Display Unequipped Items"
+        },
+        "passiveFeatureLeftClick": {
+          "name": "Passive feature left-click",
+          "hint": "Choose what left-click does for passive Talents/Traits/Powers.",
+          "choices": {
+            "chat": "Post description to chat",
+            "sheet": "Open item sheet"
+          }
+        },
+        "multiTokenItemExecutionMode": {
+          "name": "Multi-token item execution",
+          "hint": "When multiple tokens are selected, choose how Attacks/Spells/Talents are shown for execution: off, intersection (common to all), or union (all).",
+          "choices": {
+            "off": "Off",
+            "intersection": "Intersection",
+            "union": "Union"
+          }
         }
       }
     }
