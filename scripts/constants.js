@@ -52,6 +52,10 @@ export const ACTION_TYPE = {
     trait: 'tokenActionHud.uesrpg3ev4.trait',
     power: 'tokenActionHud.uesrpg3ev4.power',
 
+    // Effects
+    statusEffect: 'tokenActionHud.uesrpg3ev4.statusEffect',
+    activeEffect: 'tokenActionHud.uesrpg3ev4.activeEffect',
+
     // Utility
     utility: 'tokenActionHud.utility'
 }
@@ -104,10 +108,22 @@ export const GROUP = {
     traits: { id: 'traits', name: 'tokenActionHud.uesrpg3ev4.traits', type: 'system' },
     powers: { id: 'powers', name: 'tokenActionHud.uesrpg3ev4.powers', type: 'system' },
 
-    // Action Tracking
-    actionTracking: { id: 'actionTracking', name: 'tokenActionHud.uesrpg3ev4.actionTracking', type: 'system' },
-    actionPoints: { id: 'actionPoints', name: 'tokenActionHud.uesrpg3ev4.actionPoints', type: 'system' },
-    attacksThisRound: { id: 'attacksThisRound', name: 'tokenActionHud.uesrpg3ev4.attacksThisRound', type: 'system' },
+    // Features (Activation split)
+    talentsActivated: { id: 'talentsActivated', name: 'tokenActionHud.uesrpg3ev4.talentsActivated', type: 'system' },
+    talentsPassive: { id: 'talentsPassive', name: 'tokenActionHud.uesrpg3ev4.talentsPassive', type: 'system' },
+    traitsActivated: { id: 'traitsActivated', name: 'tokenActionHud.uesrpg3ev4.traitsActivated', type: 'system' },
+    traitsPassive: { id: 'traitsPassive', name: 'tokenActionHud.uesrpg3ev4.traitsPassive', type: 'system' },
+    powersActivated: { id: 'powersActivated', name: 'tokenActionHud.uesrpg3ev4.powersActivated', type: 'system' },
+    powersPassive: { id: 'powersPassive', name: 'tokenActionHud.uesrpg3ev4.powersPassive', type: 'system' },
+
+
+    // Effects
+    statusEffects: { id: 'statusEffects', name: 'tokenActionHud.uesrpg3ev4.statusEffects', type: 'system' },
+    // "Magic Effects" is the UESRPG-facing label for actor ActiveEffects.
+    activeEffects: { id: 'activeEffects', name: 'tokenActionHud.uesrpg3ev4.magicEffects', type: 'system' },
+
+    // Actions Tracker (non-clickable display only)
+    actionsTracker: { id: 'actionsTracker', name: 'tokenActionHud.uesrpg3ev4.actionsTracker', type: 'system' },
 
     // Utility
     combat: { id: 'combat', name: 'tokenActionHud.combat', type: 'system' },
