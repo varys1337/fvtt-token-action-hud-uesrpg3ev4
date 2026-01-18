@@ -1,3 +1,5 @@
+import { MODULE } from './constants.js'
+
 export let RollHandler = null
 
 Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
@@ -15,7 +17,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
         async handleActionClick (event, encodedValue) {
             const [actionTypeId, actionId] = encodedValue.split('|')
 
-            const renderable = ['skill', 'profession', 'magicSkill', 'combatStyle', 'weapon', 'armor', 'item', 'ammunition', 'spell', 'talent', 'trait', 'power']
+            // NOTE: Do not include Talents/Traits/Powers here.
+            // Those now support activation and have dedicated click behavior.
+            const renderable = ['skill', 'profession', 'magicSkill', 'combatStyle', 'weapon', 'armor', 'item', 'ammunition', 'spell']
 
             if (renderable.includes(actionTypeId) && this.isRenderItem()) {
                 return this.doRenderItem(this.actor, actionId)
@@ -31,6 +35,33 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
             const controlledTokens = canvas.tokens.controlled
                 .filter((token) => knownCharacters.includes(token.actor?.type))
+
+            // Multi-token execution actions (Attacks, Spells, Talents).
+            // These actions are built only when multiple tokens are selected.
+            if ((actionTypeId === 'multiCombat' || actionTypeId === 'multiItem') && controlledTokens.length > 1) {
+                const confirmed = await this.#confirmMultiTokenExecution(actionTypeId, actionId, controlledTokens.length)
+                if (!confirmed) return
+
+                for (const token of controlledTokens) {
+                    const actor = token.actor
+                    if (!actor) continue
+                    await this.#handleMultiTokenAction(event, actor, token, actionTypeId, actionId)
+                }
+                return
+            }
+
+            // Status effects need deterministic multi-token behavior:
+            // - If all selected tokens already have the status, remove it from all.
+            // - Otherwise, apply it to all.
+            if (actionTypeId === 'statusEffect' && controlledTokens.length > 1) {
+                const allHave = controlledTokens.every(t => t?.document?.hasStatusEffect ? t.document.hasStatusEffect(actionId) : false)
+                const desiredActive = !allHave
+                for (const token of controlledTokens) {
+                    const actor = token.actor
+                    await this.#handleStatusEffectAction(token, actor, actionId, desiredActive)
+                }
+                return
+            }
 
             // If multiple actors are selected
             for (const token of controlledTokens) {
@@ -133,9 +164,150 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             case 'secondaryAction':
                 await this.#handleSecondaryActionAction(event, actor, actionId)
                 break
+            case 'statusEffect':
+                await this.#handleStatusEffectAction(token, actor, actionId)
+                break
+            case 'activeEffect':
+                await this.#handleActiveEffectAction(actor, actionId)
+                break
             case 'utility':
                 await this.#handleUtilityAction(token, actionId)
                 break
+            }
+        }
+
+        /**
+         * Confirm multi-token execution to avoid accidental mass-spam or unintended action economy usage.
+         * @private
+         * @param {string} actionTypeId
+         * @param {string} actionId
+         * @param {number} count
+         * @returns {Promise<boolean>}
+         */
+        async #confirmMultiTokenExecution (actionTypeId, actionId, count) {
+            try {
+                const label = this.#describeMultiTokenAction(actionTypeId, actionId)
+                const content = `<p>Execute <strong>${label}</strong> for <strong>${count}</strong> selected tokens?</p>`
+                return await Dialog.confirm({
+                    title: 'Confirm Multi-Token Execution',
+                    content,
+                    yes: () => true,
+                    no: () => false,
+                    defaultYes: false
+                })
+            } catch (error) {
+                console.warn(`${MODULE.ID} | Multi-token confirm failed, defaulting to cancel`, error)
+                return false
+            }
+        }
+
+        /**
+         * Resolve a human-readable label for a multi-token action.
+         * @private
+         * @param {string} actionTypeId
+         * @param {string} actionId
+         * @returns {string}
+         */
+        #describeMultiTokenAction (actionTypeId, actionId) {
+            if (actionTypeId === 'multiCombat') {
+                const [cmd, arg] = String(actionId ?? '').split('~')
+                if (cmd === 'attack' && arg === 'melee') return game.i18n.localize('tokenActionHud.uesrpg3ev4.attackMelee')
+                if (cmd === 'attack' && arg === 'ranged') return game.i18n.localize('tokenActionHud.uesrpg3ev4.attackRanged')
+                return 'Combat Action'
+            }
+
+            if (actionTypeId === 'multiItem') {
+                const [itemType, nameKeyEnc] = String(actionId ?? '').split('~')
+                let nameKey = nameKeyEnc
+                try { nameKey = decodeURIComponent(nameKeyEnc) } catch (e) {}
+
+                if (itemType === 'spell') return `Spell: ${nameKey}`
+                if (itemType === 'talent') return `Talent: ${nameKey}`
+                return `Item: ${nameKey}`
+            }
+
+            return 'Action'
+        }
+
+        /**
+         * Handle a multi-token action for a single actor.
+         * @private
+         * @param {object} event
+         * @param {Actor} actor
+         * @param {Token} token
+         * @param {string} actionTypeId
+         * @param {string} actionId
+         */
+        async #handleMultiTokenAction (event, actor, token, actionTypeId, actionId) {
+            if (!actor) return
+
+            if (actionTypeId === 'multiCombat') {
+                const [cmd, arg] = String(actionId ?? '').split('~')
+                if (cmd === 'attack' && (arg === 'melee' || arg === 'ranged')) {
+                    await this.#handleAttackAction(event, actor, arg)
+                }
+                return
+            }
+
+            if (actionTypeId === 'multiItem') {
+                const [itemType, nameKeyEnc] = String(actionId ?? '').split('~')
+                let nameKey = nameKeyEnc
+                try { nameKey = decodeURIComponent(nameKeyEnc) } catch (e) {}
+                nameKey = String(nameKey ?? '').trim().toLowerCase()
+                if (!itemType || !nameKey) return
+
+                const item = actor.items?.find(i => i.type === itemType && String(i.name ?? '').trim().toLowerCase() === nameKey)
+                if (!item) return
+
+                if (itemType === 'spell') {
+                    await this.#handleSpellAction(event, actor, item.id)
+                    return
+                }
+
+                if (itemType === 'talent') {
+                    await this.#handleFeatureAction(event, actor, item.id)
+                    return
+                }
+            }
+        }
+
+        /**
+         * Toggle a Foundry status effect (condition) on an actor/token.
+         * Uses token.document.hasStatusEffect to determine current state.
+         * @private
+         * @param {Token} token
+         * @param {Actor} actor
+         * @param {string} statusId
+         */
+        async #handleStatusEffectAction (token, actor, statusId, forceActive = null) {
+            if (!actor || !statusId) return
+            try {
+                const has = token?.document?.hasStatusEffect ? token.document.hasStatusEffect(statusId) : false
+                const desired = typeof forceActive === 'boolean' ? forceActive : !has
+                await actor.toggleStatusEffect(statusId, { active: desired })
+            } catch (error) {
+                console.error(`${MODULE.ID} | Failed toggling status effect`, { statusId, error })
+                ui.notifications?.warn(`Unable to toggle status effect: ${statusId}`)
+            }
+        }
+
+        /**
+         * Toggle an ActiveEffect document enabled/disabled.
+         * @private
+         * @param {Actor} actor
+         * @param {string} effectId
+         */
+        async #handleActiveEffectAction (actor, effectId) {
+            if (!actor || !effectId) return
+            try {
+                const effects = actor.effects ?? []
+                const effect = typeof effects.get === 'function' ? effects.get(effectId) : Array.from(effects).find(e => e?.id === effectId)
+                if (!effect) return
+                const disabled = effect.disabled === true
+                await effect.update({ disabled: !disabled })
+            } catch (error) {
+                console.error(`${MODULE.ID} | Failed toggling active effect`, { effectId, error })
+                ui.notifications?.warn('Unable to toggle Active Effect')
             }
         }
 
@@ -161,17 +333,37 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                     return
                 }
 
-                // Get target token if one is selected
-                const targetToken = canvas.tokens.controlled.find(t => t.id !== this.token?.id) ||
-                                   Array.from(canvas.tokens.placeables.values()).find(t => t.isTargeted)
+                // Resolve defenders (multi-target supported): prefer explicit user targets, then fallback to a single targeted token.
+                const defenderTokenUuids = Array.from(game.user?.targets ?? [])
+                    .map(t => t?.document?.uuid ?? t?.uuid)
+                    .filter(Boolean)
+
+                if (defenderTokenUuids.length === 0) {
+                    const targetToken = canvas.tokens.controlled.find(t => t.id !== this.token?.id) ||
+                        Array.from(canvas.tokens.placeables.values()).find(t => t.isTargeted)
+                    if (targetToken?.document?.uuid || targetToken?.uuid) {
+                        defenderTokenUuids.push(targetToken.document?.uuid ?? targetToken.uuid)
+                    }
+                }
+
+                if (defenderTokenUuids.length === 0) {
+                    ui.notifications.warn('Select at least one target to attack')
+                    return
+                }
 
                 // Dynamically import OpposedWorkflow from system
                 const { OpposedWorkflow } = await import('/systems/uesrpg-3ev4/module/combat/opposed-workflow.js')
 
                 // Create pending attack workflow
+                const attackerToken = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
+                if (!attackerToken) {
+                    ui.notifications.warn('No attacker token found. Select your token and try again.')
+                    return
+                }
+
                 await OpposedWorkflow.createPending({
-                    attackerTokenUuid: this.token?.document?.uuid || actor.uuid,
-                    defenderTokenUuid: targetToken?.document?.uuid || null,
+                    attackerTokenUuid: attackerToken.document?.uuid ?? attackerToken.uuid,
+                    defenderTokenUuids,
                     weaponUuid: weapon.uuid,
                     attackMode
                 })
@@ -779,19 +971,71 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             if (!spell) return
 
             try {
-                // Get target token if one is selected (optional for unopposed spells)
-                const targetToken = canvas.tokens.controlled.find(t => t.id !== this.token?.id) ||
-                                   Array.from(canvas.tokens.placeables.values()).find(t => t.isTargeted)
+                const casterToken = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
+                if (!casterToken) {
+                    ui.notifications.warn('No caster token found. Select your token and try again.')
+                    return
+                }
 
-                // Dynamically import MagicOpposedWorkflow from system
-                const { MagicOpposedWorkflow } = await import('/systems/uesrpg-3ev4/module/magic/opposed-workflow.js')
+                const [{ MagicOpposedWorkflow }, { classifySpellForRouting, shouldUseTargetedSpellWorkflow }, { getSpellRangeType, getSpellAoEConfig, placeAoETemplateAndCollectTargets }] = await Promise.all([
+                    import('/systems/uesrpg-3ev4/module/magic/opposed-workflow.js'),
+                    import('/systems/uesrpg-3ev4/module/magic/spell-routing.js'),
+                    import('/systems/uesrpg-3ev4/module/magic/spell-range.js')
+                ])
 
-                // Create pending magic opposed workflow - target is now optional
-                await MagicOpposedWorkflow.createPending({
-                    attackerTokenUuid: this.token?.document?.uuid || actor.uuid,
-                    defenderTokenUuid: targetToken?.document?.uuid || null, // null is OK for unopposed spells
-                    spellUuid: spell.uuid
-                })
+                const targetsFromUser = Array.from(game.user?.targets ?? [])
+                const rangeType = getSpellRangeType(spell)
+
+                // AoE targeting: place template, then collect affected tokens.
+                let aoeTemplateUuid = null
+                let aoeTemplateId = null
+                let targets = targetsFromUser
+                if (rangeType === 'aoe') {
+                    const placed = await placeAoETemplateAndCollectTargets({ casterToken, spell })
+                    if (!placed) return
+                    aoeTemplateUuid = placed.templateDoc?.uuid ?? null
+                    aoeTemplateId = placed.templateDoc?.id ?? null
+                    targets = Array.isArray(placed.targets) ? placed.targets : []
+                }
+
+                const cls = classifySpellForRouting(spell)
+
+                // Targeted (attack/healing/direct) spells route into the opposed workflow when at least one defender is present.
+                if (shouldUseTargetedSpellWorkflow(spell, targets)) {
+                    const defenderTokenUuids = Array.from(targets)
+                        .map(t => t?.document?.uuid ?? t?.uuid)
+                        .filter(Boolean)
+
+                    const aoeConfig = (rangeType === 'aoe')
+                        ? { ...(getSpellAoEConfig(spell) ?? {}), isAoE: true, templateUuid: aoeTemplateUuid, templateId: aoeTemplateId }
+                        : null
+
+                    await MagicOpposedWorkflow.createPending({
+                        attackerTokenUuid: casterToken.document?.uuid ?? casterToken.uuid,
+                        defenderTokenUuids,
+                        spellUuid: spell.uuid,
+                        spellOptions: {},
+                        castActionType: 'primary',
+                        aoe: aoeConfig,
+                        isAoE: rangeType === 'aoe'
+                    })
+                    return
+                }
+
+                // Untargeted spells: use the modern unopposed workflow.
+                if (!cls.isTargeted) {
+                    await MagicOpposedWorkflow.castUnopposed({
+                        attackerActorUuid: actor.uuid,
+                        attackerTokenUuid: casterToken.document?.uuid ?? casterToken.uuid,
+                        spellUuid: spell.uuid,
+                        spellOptions: {},
+                        castActionType: 'primary'
+                    })
+                    return
+                }
+
+                // Targeted spell without targets.
+                ui.notifications.warn('Select at least one target for this spell.')
             } catch (error) {
                 console.error('Error casting spell:', error)
                 // Fallback to opening spell sheet
@@ -810,18 +1054,44 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const feature = actor.items.get(actionId)
             if (!feature) return
 
-            // Right-click: open sheet
-            if (this.isRenderItem()) {
+            const isRightClick = (event?.button === 2) || (event?.which === 3)
+            if (isRightClick) {
                 return feature.sheet.render(true)
             }
 
-            // Left-click: post description to chat
+            const activation = feature?.system?.activation ?? {}
+
+            // Activated feature: use the system activation executor (same as the sheet).
+            if (activation?.enabled === true) {
+                try {
+                    const { executeItemActivation } = await import('/systems/uesrpg-3ev4/module/system/activation/activation-executor.js')
+                    await executeItemActivation({
+                        item: feature,
+                        actor,
+                        event,
+                        renderChat: true,
+                        includeImage: false,
+                        context: {}
+                    })
+                } catch (err) {
+                    console.error('token-action-hud-uesrpg3ev4 | Feature activation failed', err)
+                    ui.notifications.error('Failed to activate feature. See console for details.')
+                }
+                return
+            }
+
+            // Passive feature: configured left-click behavior.
+            const mode = game.settings.get(MODULE.ID, 'passiveFeatureLeftClick') || 'chat'
+            if (mode === 'sheet') {
+                return feature.sheet.render(true)
+            }
+
             const description = feature.system?.description || ''
-            ChatMessage.create({
+            await ChatMessage.create({
                 speaker: ChatMessage.getSpeaker({ actor }),
                 content: `
                     <h3>${feature.name}</h3>
-                    <p>${description}</p>
+                    <div>${description || '<i>No description.</i>'}</div>
                 `
             })
         }
