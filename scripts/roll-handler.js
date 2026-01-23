@@ -830,6 +830,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
         /**
          * Handle combat style action
+         * Performs an opposed test roll (same as from character sheet)
+         * Combat styles are skill items, so they use the same roll method as regular skills
          * @private
          * @param {object} event    The event
          * @param {object} actor    The actor
@@ -844,23 +846,49 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 return combatStyle.sheet.render(true)
             }
 
-            // Left-click: set as active combat style
+            // Left-click: perform skill roll (same as regular skills - handles both opposed and unopposed)
+            // The system's SimpleActorSheet._onSkillRoll handles combat styles the same way as regular skills
             try {
-                // Deactivate all other combat styles
-                const updates = actor.items
-                    .filter(item => item.type === 'combatStyle' && item.id !== actionId)
-                    .map(item => ({ _id: item.id, 'system.active': false }))
+                const fakeEvent = new MouseEvent('click', {
+                    bubbles: true,
+                    cancelable: true,
+                    view: window,
+                    shiftKey: event?.shiftKey || false
+                })
 
-                if (updates.length > 0) {
-                    await actor.updateEmbeddedDocuments('Item', updates)
+                Object.defineProperty(fakeEvent, 'currentTarget', {
+                    writable: false,
+                    value: {
+                        closest: () => ({ dataset: { itemId: actionId } })
+                    }
+                })
+
+                // Call the actor sheet's skill roll method directly
+                // This handles both opposed (with target) and unopposed (no target) tests
+                const sheet = actor.sheet
+                if (sheet && typeof sheet._onSkillRoll === 'function') {
+                    await sheet._onSkillRoll(fakeEvent)
+                } else {
+                    // Fallback: if target is selected, try SkillOpposedWorkflow
+                    const targetToken = canvas.tokens.controlled.find(t => t.id !== this.token?.id) ||
+                                       Array.from(canvas.tokens.placeables.values()).find(t => t.isTargeted)
+                    
+                    if (targetToken) {
+                        const { SkillOpposedWorkflow } = await import('/systems/uesrpg-3ev4/module/skills/opposed-workflow.js')
+                        await SkillOpposedWorkflow.createPending({
+                            attackerTokenUuid: this.token?.document?.uuid || actor.uuid,
+                            defenderTokenUuid: targetToken?.document?.uuid,
+                            attackerSkillUuid: combatStyle.uuid,
+                            attackerSkillLabel: combatStyle.name
+                        })
+                    } else {
+                        // Final fallback: open sheet
+                        combatStyle.sheet.render(true)
+                    }
                 }
-
-                // Activate this combat style
-                await combatStyle.update({ 'system.active': true })
-
-                ui.notifications.info(`${combatStyle.name} is now the active combat style`)
             } catch (error) {
-                console.error('Error setting active combat style:', error)
+                console.error('Error handling combat style action:', error)
+                ui.notifications.error('Failed to roll combat style. See console for details.')
             }
         }
 
