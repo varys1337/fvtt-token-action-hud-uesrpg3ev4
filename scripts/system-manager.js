@@ -76,17 +76,11 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * Returns styles to Token Action HUD Core
          * Called by Token Action HUD Core
          * @override
-         * @returns {object} The TAH system styles
+         * @returns {object} The TAH system styles (empty - no custom styles registered)
          */
         registerStyles () {
-            return {
-                uesrpg3ev4: {
-                    class: 'tah-style-uesrpg3ev4',
-                    file: 'token-action-hud-uesrpg3ev4',
-                    moduleId: MODULE.ID,
-                    name: 'UESRPG 3ev4 Style'
-                }
-            }
+            // No custom styles - return empty object
+            return {}
         }
     }
 })
