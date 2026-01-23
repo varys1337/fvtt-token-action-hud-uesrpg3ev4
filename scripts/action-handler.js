@@ -308,8 +308,43 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {array} groupIds
          */
         async buildSystemActions (groupIds) {
-            // Set actor and token variables
-            this.actors = (!this.actor) ? this._getActors() : [this.actor]
+            // Handle multiple token selection
+            if (!this.actor) {
+                // Get controlled tokens with valid actors
+                const controlledTokens = canvas.tokens.controlled.filter(token => token.actor)
+                
+                if (controlledTokens.length === 0) {
+                    // No valid tokens selected
+                    return
+                }
+
+                // Get all actor types from selected tokens
+                const actorTypes = controlledTokens
+                    .map(token => token.actor?.type)
+                    .filter(type => type === 'Player Character' || type === 'NPC')
+
+                if (actorTypes.length === 0) {
+                    // No valid actor types
+                    return
+                }
+
+                // Check if all selected actors are the same type
+                const firstType = actorTypes[0]
+                const allSameType = actorTypes.every(type => type === firstType)
+
+                if (!allSameType) {
+                    // Mixed actor types - don't show HUD for mixed groups
+                    return
+                }
+
+                // All actors are the same type - use the first one as representative
+                this.actor = controlledTokens[0].actor
+                this.actors = controlledTokens.map(token => token.actor).filter(Boolean)
+            } else {
+                // Single actor selected
+                this.actors = [this.actor]
+            }
+
             this.actorType = this.actor?.type
 
             // Set items variable - ensure it's always initialized
