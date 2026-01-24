@@ -11,7 +11,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
         group.name = coreModule.api.Utils.i18n(group.name)
         group.listName = `Group: ${coreModule.api.Utils.i18n(group.listName ?? group.name)}`
     })
-    const groupsArray = Object.values(groups)
+    const groupsArray = Object.values(groups).filter(group => group?.id !== 'actionsTracker')
     DEFAULTS = {
         layout: [
             {
@@ -80,14 +80,6 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 groups: [
                     { ...groups.statusEffects, nestId: 'effects_statusEffects' },
                     { ...groups.activeEffects, nestId: 'effects_magicEffects' }
-                ]
-            },
-            {
-                nestId: 'actionsTracker',
-                id: 'actionsTracker',
-                name: coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.actionsTracker'),
-                groups: [
-                    { ...groups.actionsTracker, nestId: 'actionsTracker_actionsTracker' }
                 ]
             },
             {
