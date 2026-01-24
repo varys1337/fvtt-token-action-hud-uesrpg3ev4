@@ -125,6 +125,9 @@ export const GROUP = {
     // Actions Tracker (non-clickable display only)
     actionsTracker: { id: 'actionsTracker', name: 'tokenActionHud.uesrpg3ev4.actionsTracker', type: 'system' },
 
+    // Resources (display-only badges)
+    resources: { id: 'resources', name: 'tokenActionHud.uesrpg3ev4.resources', type: 'system' },
+
     // Utility
     combat: { id: 'combat', name: 'tokenActionHud.combat', type: 'system' },
     token: { id: 'token', name: 'tokenActionHud.token', type: 'system' },
