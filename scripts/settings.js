@@ -54,4 +54,17 @@ export function register (coreUpdate) {
             coreUpdate(value)
         }
     })
+
+    game.settings.register(MODULE.ID, 'debug', {
+        name: game.i18n.localize('tokenActionHud.uesrpg3ev4.settings.debug.name'),
+        hint: game.i18n.localize('tokenActionHud.uesrpg3ev4.settings.debug.hint'),
+        scope: 'client',
+        config: true,
+        type: Boolean,
+        default: false,
+        onChange: (value) => {
+            // Trigger a refresh so debug-only instrumentation can take effect immediately.
+            coreUpdate(value)
+        }
+    })
 }
