@@ -1,4 +1,5 @@
 import { MODULE } from './constants.js'
+import { isSupportedActorType } from './utils.js'
 
 export let RollHandler = null
 
@@ -17,6 +18,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
         async handleActionClick (event, encodedValue) {
             const [actionTypeId, actionId] = encodedValue.split('|')
 
+            const isRightClick = event?.button === 2 || event?.type === 'contextmenu'
+
             // NOTE: Do not include Talents/Traits/Powers here.
             // Those now support activation and have dedicated click behavior.
             const renderable = ['skill', 'profession', 'magicSkill', 'combatStyle', 'weapon', 'armor', 'item', 'ammunition', 'spell']
@@ -25,16 +28,14 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 return this.doRenderItem(this.actor, actionId)
             }
 
-            const knownCharacters = ['Player Character', 'NPC']
-
             // If single actor is selected
             if (this.actor) {
                 await this.#handleAction(event, this.actor, this.token, actionTypeId, actionId)
                 return
             }
 
-            const controlledTokens = canvas.tokens.controlled
-                .filter((token) => knownCharacters.includes(token.actor?.type))
+            const controlledTokens = (canvas?.tokens?.controlled ?? [])
+                .filter((token) => isSupportedActorType(token?.actor?.type))
 
             // Multi-token execution actions (Attacks, Spells, Talents).
             // These actions are built only when multiple tokens are selected.
@@ -50,15 +51,33 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 return
             }
 
-            // Status effects need deterministic multi-token behavior:
-            // - If all selected tokens already have the status, remove it from all.
-            // - Otherwise, apply it to all.
+            // Status effects need deterministic multi-token behavior.
+            // Left-click: toggle active state (all-or-none).
+            // Right-click: toggle overlay (visual) state (all-or-none) while ensuring the status is active.
             if (actionTypeId === 'statusEffect' && controlledTokens.length > 1) {
+                if (isRightClick) {
+                    const icon = this.#getStatusEffectIcon(actionId)
+                    if (!icon) {
+                        ui.notifications?.warn(`No icon found for status effect: ${actionId}`)
+                        return
+                    }
+
+                    const allOverlay = controlledTokens.every(t => String(this.#getTokenOverlayEffect(t)) === String(icon))
+                    const desiredOverlay = !allOverlay
+
+                    for (const token of controlledTokens) {
+                        const actor = token.actor
+                        await this.#ensureStatusEffectActive(token, actor, actionId)
+                        await this.#setTokenOverlayEffect(token, icon, desiredOverlay)
+                    }
+                    return
+                }
+
                 const allHave = controlledTokens.every(t => t?.document?.hasStatusEffect ? t.document.hasStatusEffect(actionId) : false)
                 const desiredActive = !allHave
                 for (const token of controlledTokens) {
                     const actor = token.actor
-                    await this.#handleStatusEffectAction(token, actor, actionId, desiredActive)
+                    await this.#handleStatusEffectAction(event, token, actor, actionId, desiredActive)
                 }
                 return
             }
@@ -165,7 +184,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 await this.#handleSecondaryActionAction(event, actor, actionId)
                 break
             case 'statusEffect':
-                await this.#handleStatusEffectAction(token, actor, actionId)
+                await this.#handleStatusEffectAction(event, token, actor, actionId)
                 break
             case 'activeEffect':
                 await this.#handleActiveEffectAction(actor, actionId)
@@ -272,15 +291,110 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
         }
 
         /**
-         * Toggle a Foundry status effect (condition) on an actor/token.
-         * Uses token.document.hasStatusEffect to determine current state.
+         * Resolve the icon path for a Foundry status effect id.
+         * @private
+         * @param {string} statusId
+         * @returns {string|null}
+         */
+        #getStatusEffectIcon (statusId) {
+            const effects = Array.isArray(CONFIG?.statusEffects) ? CONFIG.statusEffects : []
+            const found = effects.find(e => String(e?.id ?? '') === String(statusId))
+            // Prefer "img" (v13) while supporting legacy "icon".
+            const img = found?.img ?? found?.icon
+            return img ? String(img) : null
+        }
+
+
+        /**
+         * Read the current Token overlay effect path without using deprecated accessors.
+         * @private
+         * @param {Token} token
+         * @returns {string}
+         */
+        #getTokenOverlayEffect (token) {
+            const doc = token?.document
+            // Avoid TokenDocument#overlayEffect getter (deprecated). Read from source instead.
+            const src = doc?._source
+            const overlay = src && typeof src.overlayEffect === 'string' ? src.overlayEffect : ''
+            return String(overlay || '')
+        }
+
+        /**
+         * Ensure a Foundry status effect is active on the actor/token.
          * @private
          * @param {Token} token
          * @param {Actor} actor
          * @param {string} statusId
          */
-        async #handleStatusEffectAction (token, actor, statusId, forceActive = null) {
+        async #ensureStatusEffectActive (token, actor, statusId) {
             if (!actor || !statusId) return
+            const has = token?.document?.hasStatusEffect ? token.document.hasStatusEffect(statusId) : false
+            if (has) return
+            try {
+                await actor.toggleStatusEffect(statusId, { active: true })
+            } catch (error) {
+                console.error(`${MODULE.ID} | Failed ensuring status effect active`, { statusId, error })
+            }
+        }
+
+        /**
+         * Set or clear a token overlay effect (visual only).
+         * Uses Token#toggleEffect when available; falls back to TokenDocument update.
+         * @private
+         * @param {Token} token
+         * @param {string} icon
+         * @param {boolean} desired
+         */
+        async #setTokenOverlayEffect (token, icon, desired) {
+            if (!token || !icon) return
+            const doc = token.document
+            if (!doc || typeof doc.update !== 'function') return
+
+            // Read current overlay without deprecated accessors.
+            const current = this.#getTokenOverlayEffect(token)
+            const want = desired ? String(icon) : ''
+
+            // No-op if already in desired state.
+            if ((desired && String(current) === want) || (!desired && String(current) === '')) return
+
+            try {
+                // TokenDocument.overlayEffect is a StringField and is not nullable; clear using an empty string.
+                await doc.update({ overlayEffect: want })
+            } catch (error) {
+                console.error(`${MODULE.ID} | Failed setting overlay effect`, { icon, desired, error })
+            }
+        }
+
+        /**
+         * Status effect behavior:
+         * - Left-click toggles active state.
+         * - Right-click toggles the overlay (visual) state while ensuring the status is active.
+         * @private
+         * @param {MouseEvent} event
+         * @param {Token} token
+         * @param {Actor} actor
+         * @param {string} statusId
+         * @param {boolean|null} forceActive
+         */
+        async #handleStatusEffectAction (event, token, actor, statusId, forceActive = null) {
+            if (!actor || !statusId) return
+
+            const isRightClick = event?.button === 2 || event?.type === 'contextmenu'
+            if (isRightClick) {
+                const icon = this.#getStatusEffectIcon(statusId)
+                if (!icon) {
+                    ui.notifications?.warn(`No icon found for status effect: ${statusId}`)
+                    return
+                }
+
+                // Ensure status is active; then toggle overlay.
+                await this.#ensureStatusEffectActive(token, actor, statusId)
+                const current = String(this.#getTokenOverlayEffect(token))
+                const desiredOverlay = current !== String(icon)
+                await this.#setTokenOverlayEffect(token, icon, desiredOverlay)
+                return
+            }
+
             try {
                 const has = token?.document?.hasStatusEffect ? token.document.hasStatusEffect(statusId) : false
                 const desired = typeof forceActive === 'boolean' ? forceActive : !has
