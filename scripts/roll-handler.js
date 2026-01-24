@@ -22,10 +22,11 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
             // NOTE: Do not include Talents/Traits/Powers here.
             // Those now support activation and have dedicated click behavior.
-            const renderable = ['skill', 'profession', 'magicSkill', 'combatStyle', 'weapon', 'armor', 'item', 'ammunition', 'spell']
+            const renderable = ['skill', 'magicSkill', 'combatStyle', 'weapon', 'armor', 'item', 'ammunition', 'spell']
 
             if (renderable.includes(actionTypeId) && this.isRenderItem()) {
-                return this.doRenderItem(this.actor, actionId)
+                const rendered = this.#renderItemSheet(this.actor, actionId)
+                if (rendered) return
             }
 
             // If single actor is selected
@@ -106,6 +107,20 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {object} group The group
          */
         async handleGroupClick (event, group) {}
+
+        /**
+         * Render an item sheet by id if it exists on the actor.
+         * @private
+         * @param {Actor} actor
+         * @param {string} actionId
+         * @returns {boolean} true if a sheet render was attempted
+         */
+        #renderItemSheet (actor, actionId) {
+            const item = actor?.items?.get?.(actionId) ?? null
+            if (!item || !item.sheet?.render) return false
+            item.sheet.render(true)
+            return true
+        }
 
         /**
          * Handle action
