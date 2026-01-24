@@ -7,6 +7,7 @@
       "spells": "Spells",
       "features": "Features",
       "actionsTracker": "Actions",
+      "resources": "Resources",
       "effects": "Effects",
       "statusEffects": "Status Effects",
       "magicEffects": "Magic Effects",
@@ -96,7 +97,11 @@
             "intersection": "Intersection",
             "union": "Union"
           }
-        }
+	        },
+	        "debug": {
+	          "name": "Debug logging",
+	          "hint": "Enable additional console logging for this Token Action HUD system module."
+	        }
       }
     }
   }
