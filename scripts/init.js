@@ -625,7 +625,7 @@ Hooks.on('renderChatMessage', async (message, html, data) => {
 })
 
 // ---------------------------------------------------------------------------
-// Minimal API surface for additive integrations.
+// Phase 4: Public, minimal API surface for additive integrations.
 // ---------------------------------------------------------------------------
 
 Hooks.once('ready', () => {
