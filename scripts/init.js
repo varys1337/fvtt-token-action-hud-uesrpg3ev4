@@ -59,6 +59,57 @@ function getTabNodes (tabBar) {
     return controls
 }
 
+function getActionsTrackerLabel () {
+    const key = 'tokenActionHud.uesrpg3ev4.actionsTracker'
+    const localized = game?.i18n?.localize?.(key)
+    if (localized && localized !== key) return localized
+    return 'Actions'
+}
+
+function isActionsTrackerControl (control, node) {
+    if (!control && !node) return false
+
+    const getId = (el) => (
+        el?.dataset?.groupId
+        || el?.dataset?.group
+        || el?.dataset?.tab
+        || el?.dataset?.id
+        || el?.dataset?.groupid
+        || null
+    )
+
+    const id = getId(control) || getId(node)
+    if (id && String(id) === 'actionsTracker') return true
+
+    const label = (control?.textContent ?? '').trim()
+    if (!label) return false
+    return label.toLowerCase() === getActionsTrackerLabel().trim().toLowerCase()
+}
+
+function pruneLegacyActionsTrackerTab (hudRoot) {
+    const tabBar = getTabBar(hudRoot)
+    if (!tabBar) return
+
+    const nodes = getTabNodes(tabBar)
+    if (!nodes.length) return
+
+    for (const node of nodes) {
+        if (!node) continue
+        if (node.closest?.('[data-uesrpg-actions-tracker="true"]')) continue
+
+        const control = node.classList?.contains('tah-tab-group')
+            ? (node.querySelector('button, a, div[role="button"]') ?? node)
+            : node
+
+        if (!control) continue
+        if (control.closest?.('[data-uesrpg-actions-tracker="true"]')) continue
+        if (!isActionsTrackerControl(control, node)) continue
+
+        const target = node.classList?.contains('tah-tab-group') ? node : control
+        target.remove()
+    }
+}
+
 /**
  * Locate the Utility tab control without relying on localization keys.
  * Preference order:
@@ -330,6 +381,7 @@ function ensureActionsTrackerTab (app, html) {
 
         const hudRoot = getHudRoot(app, html)
         if (!hudRoot) return
+        pruneLegacyActionsTrackerTab(hudRoot)
 
         // Prefer a robust insertion point derived from the actual Utility control.
         // This handles layouts where the tab bar is nested in an inner scroller and does not match legacy ids/classes.
