@@ -10,7 +10,7 @@
   ],
   "url": "This is auto replaced",
   "flags": {},
-  "version": "This is auto replaced",
+  "version": "1.0.6",
   "compatibility": {
     "minimum": "11",
     "verified": "13"
@@ -18,8 +18,7 @@
   "esmodules": [
     "./scripts/init.js"
   ],
-  "scripts": [
-  ],
+  "scripts": [],
   "styles": [
     "./styles/token-action-hud-uesrpg3ev4.css"
   ],
