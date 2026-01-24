@@ -1,5 +1,12 @@
 import { SystemManager } from './system-manager.js'
 import { MODULE, REQUIRED_CORE_MODULE_VERSION } from './constants.js'
+import { getSystemModulePath, isSupportedActor, debugLog } from './utils.js'
+import {
+    invalidateAllBuildCaches,
+    invalidateBuildCacheByActorId,
+    invalidateBuildCacheByKey
+} from './cache.js'
+import { registerBuildExtension, unregisterBuildExtension } from './extensions.js'
 
 // Cache last known HUD root from render hook for idempotent re-ensures.
 let _lastHudRootEl = null
@@ -231,12 +238,10 @@ const ACTION_TRACKER_FLAG_KEY = 'actionTracker'
 const DEFAULT_ACTION_TRACKER_MAX = 3
 
 function getEligibleControlledActor () {
-    const token = canvas?.tokens?.controlled?.[0] ?? null
+    if (!canvas?.ready || !canvas?.tokens) return null
+    const token = canvas.tokens.controlled?.[0] ?? null
     const actor = token?.actor ?? null
-    if (!actor) return null
-    // Actor types in this system are localized labels (see system template.json):
-    // "Player Character" and "NPC".
-    if (!['Player Character', 'NPC'].includes(actor.type)) return null
+    if (!isSupportedActor(actor)) return null
     return actor
 }
 
@@ -342,7 +347,7 @@ function ensureActionsTrackerTab (app, html) {
 
         const actor = getEligibleControlledActor()
         const current = actor ? getActorActionCount(actor) : 0
-    const max = actor ? getActorActionMax(actor) : DEFAULT_ACTION_TRACKER_MAX
+        const max = actor ? getActorActionMax(actor) : DEFAULT_ACTION_TRACKER_MAX
         const label = `Action ${current}/${max}`
 
         // Check if tracker already exists
@@ -549,7 +554,9 @@ async function incrementAttackCount (attackerActor) {
     try {
         // Try to use the system's AttackTracker first (preferred method)
         try {
-            const { AttackTracker } = await import('/systems/uesrpg-3ev4/module/combat/attack-tracker.js')
+            const path = getSystemModulePath('module/combat/attack-tracker.js')
+            if (!path) throw new Error('System path unavailable')
+            const { AttackTracker } = await import(path)
             if (AttackTracker && typeof AttackTracker.incrementAttacks === 'function') {
                 await AttackTracker.incrementAttacks(attackerActor)
                 return
@@ -615,4 +622,28 @@ Hooks.on('renderChatMessage', async (message, html, data) => {
             console.error('Error incrementing attack count from button click:', error)
         }
     })
+})
+
+// ---------------------------------------------------------------------------
+// Minimal API surface for additive integrations.
+// ---------------------------------------------------------------------------
+
+Hooks.once('ready', () => {
+    const mod = game?.modules?.get?.(MODULE.ID)
+    if (!mod) return
+
+    // Expose a minimal API without coupling to Token Action HUD Core internals.
+    // This allows other system-adjacent modules to:
+    //  - register small additive build extensions
+    //  - invalidate the conservative build cache when they change relevant data
+    mod.api = {
+        registerBuildExtension,
+        unregisterBuildExtension,
+        invalidateCacheByActorId: invalidateBuildCacheByActorId,
+        invalidateCacheByTokenId: invalidateBuildCacheByKey,
+        invalidateAllCaches: invalidateAllBuildCaches
+    }
+
+    debugLog('API ready')
+    Hooks.callAll('tokenActionHud.uesrpg3ev4ApiReady', mod.api)
 })
