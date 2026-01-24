@@ -1,13 +1,51 @@
 // System Module Imports
 import { ACTION_TYPE, GROUP, MODULE, SPELL_SCHOOLS } from './constants.js'
+import { isSupportedActor, isSupportedActorType, debugLog } from './utils.js'
+import {
+    getBuildCacheEntry,
+    invalidateBuildCacheByActorId,
+    invalidateBuildCacheByKey,
+    registerBuildCacheInvalidationHooks,
+    safeModifiedTime,
+    setBuildCacheEntry
+} from './cache.js'
+import { runBuildExtensions } from './extensions.js'
 
 export let ActionHandler = null
+
+// Phase 4: keep cache lifecycle in a dedicated module for clarity.
+registerBuildCacheInvalidationHooks()
 
 Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
     /**
      * Extends Token Action HUD Core's ActionHandler class and builds system-defined actions for the HUD
      */
     ActionHandler = class ActionHandler extends coreModule.api.ActionHandler {
+        constructor (...args) {
+            super(...args)
+            /** @type {Array<{groupData: object, actions: object[]}>} */
+            this._uesrpgBuildRecords = []
+        }
+
+        /**
+         * Override addActions to also capture records for conservative caching.
+         * @override
+         */
+        addActions (actions, groupData) {
+            super.addActions(actions, groupData)
+            try {
+                if (!Array.isArray(actions) || !groupData?.id) return
+                // Deep-clone actions to avoid later mutation by Core.
+                const clone = foundry?.utils?.deepClone
+                    ? foundry.utils.deepClone(actions)
+                    : JSON.parse(JSON.stringify(actions))
+                const gd = { ...groupData }
+                this._uesrpgBuildRecords.push({ groupData: gd, actions: clone })
+            } catch (e) {
+                // Cache capture is best-effort. Never block HUD building.
+            }
+        }
+
         /**
          * Map system activation action types to stable sort weights.
          * Lower weight sorts first.
@@ -301,6 +339,87 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             return this.items
         }
 
+
+        /**
+         * Build a per-build item index to avoid repeated full scans of actor items.
+         * The index is rebuilt once per Token Action HUD build and used by group builders.
+         * @private
+         */
+        #buildItemIndex () {
+            const byType = new Map()
+
+            /** @type {{ id: string, item: any } | null} */
+            let equippedRangedWeapon = null
+            /** @type {{ id: string, item: any } | null} */
+            let activeCombatStyle = null
+
+            let hasEquippedMeleeWeapon = false
+            let hasEquippedRangedWeapon = false
+
+            const entries = this.#getItemsIterator()
+            for (const entry of entries) {
+                // entry can be [id, item] or (fallback) item-like; normalize
+                const itemId = Array.isArray(entry) ? entry[0] : (entry?.id ?? entry?._id ?? null)
+                const item = Array.isArray(entry) ? entry[1] : entry
+                if (!item || !item.type) continue
+
+                const type = String(item.type)
+                if (!byType.has(type)) byType.set(type, [])
+                byType.get(type).push([itemId, item])
+
+                // Convenience flags for frequently-queried state
+                if (type === 'weapon' && item.system?.equipped === true) {
+                    const mode = String(item.system?.attackMode ?? '')
+                    if (mode === 'melee') hasEquippedMeleeWeapon = true
+                    if (mode === 'ranged') {
+                        hasEquippedRangedWeapon = true
+                        if (!equippedRangedWeapon) equippedRangedWeapon = { id: itemId, item }
+                    }
+                } else if (type === 'combatStyle' && item.system?.active && !activeCombatStyle) {
+                    activeCombatStyle = { id: itemId, item }
+                }
+            }
+
+
+            this._itemIndex = {
+                byType,
+                hasEquippedMeleeWeapon,
+                hasEquippedRangedWeapon,
+                equippedRangedWeapon,
+                activeCombatStyle
+            }
+        }
+
+        /**
+         * Get item entries of a specific type from the per-build index.
+         * Returns an array of [itemId, item] pairs.
+         * @private
+         * @param {string} type
+         * @returns {Array<[string, any]>}
+         */
+        #getItemsOfType (type) {
+            const t = String(type ?? '')
+            return this._itemIndex?.byType?.get(t) ?? []
+        }
+
+        /**
+         * Get the first equipped ranged weapon (if any) from the item index.
+         * @private
+         * @returns {{ id: string, item: any } | null}
+         */
+        #getEquippedRangedWeapon () {
+            return this._itemIndex?.equippedRangedWeapon ?? null
+        }
+
+        /**
+         * Get active combat style (if any) from the item index.
+         * @private
+         * @returns {{ id: string, item: any } | null}
+         */
+        #getActiveCombatStyle () {
+            return this._itemIndex?.activeCombatStyle ?? null
+        }
+
         /**
          * Build system actions
          * Called by Token Action HUD Core
@@ -308,44 +427,63 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {array} groupIds
          */
         async buildSystemActions (groupIds) {
-            // Handle multiple token selection
+            // For safety, bypass caching for partial builds.
+            const isPartialBuild = Array.isArray(groupIds) && groupIds.length > 0
+
+            // Determine controlled actors for this build.
+            // Token Action HUD Core may provide `this.actor` only for single-token selection.
+            // When multiple tokens are selected, we derive a deterministic actor set here.
+            this.isMultiTokenSelection = false
+
             if (!this.actor) {
-                // Get controlled tokens with valid actors
-                const controlledTokens = canvas.tokens.controlled.filter(token => token.actor)
-                
-                if (controlledTokens.length === 0) {
-                    // No valid tokens selected
-                    return
-                }
+                const controlledTokens = (canvas?.tokens?.controlled ?? []).filter(t => isSupportedActor(t?.actor))
+                if (!controlledTokens.length) return
 
-                // Get all actor types from selected tokens
-                const actorTypes = controlledTokens
-                    .map(token => token.actor?.type)
-                    .filter(type => type === 'Player Character' || type === 'NPC')
+                const actors = controlledTokens.map(t => t.actor).filter(Boolean)
+                if (!actors.length) return
 
-                if (actorTypes.length === 0) {
-                    // No valid actor types
-                    return
-                }
+                // Do not show HUD for mixed supported actor types.
+                const firstType = actors[0].type
+                if (!actors.every(a => a.type === firstType)) return
 
-                // Check if all selected actors are the same type
-                const firstType = actorTypes[0]
-                const allSameType = actorTypes.every(type => type === firstType)
-
-                if (!allSameType) {
-                    // Mixed actor types - don't show HUD for mixed groups
-                    return
-                }
-
-                // All actors are the same type - use the first one as representative
-                this.actor = controlledTokens[0].actor
-                this.actors = controlledTokens.map(token => token.actor).filter(Boolean)
+                // Representative actor: required for Core handler methods that assume `this.actor` exists.
+                this.actor = actors[0]
+                this.actors = actors
+                this.isMultiTokenSelection = actors.length > 1
             } else {
-                // Single actor selected
                 this.actors = [this.actor]
+                this.isMultiTokenSelection = false
             }
 
             this.actorType = this.actor?.type
+
+            // Phase 3: apply conservative cache for single-token selection only.
+            // - We key by Token id to account for token-local state (status effects/overlays).
+            // - We also check best-effort modifiedTime hints to avoid stale display.
+            if (!isPartialBuild && !this.isMultiTokenSelection) {
+                const token = this.token ?? canvas?.tokens?.controlled?.[0] ?? null
+                const cacheKey = token?.id ?? null
+                if (cacheKey) {
+                    const cached = getBuildCacheEntry(cacheKey)
+                    const actorId = this.actor?.id ?? null
+                    const actorMod = safeModifiedTime(this.actor)
+                    const tokenMod = safeModifiedTime(token?.document)
+
+                    if (cached && cached.actorId === actorId) {
+                        // If we have mod-time hints, verify they match.
+                        const actorOk = (cached.actorMod == null || actorMod == null) ? true : cached.actorMod === actorMod
+                        const tokenOk = (cached.tokenMod == null || tokenMod == null) ? true : cached.tokenMod === tokenMod
+                        if (actorOk && tokenOk) {
+                            for (const rec of cached.records ?? []) {
+                                super.addActions(rec.actions, rec.groupData)
+                            }
+                            return
+                        }
+                        // Stale cache - drop it.
+                        invalidateBuildCacheByKey(cacheKey)
+                    }
+                }
+            }
 
             // Set items variable - ensure it's always initialized
             if (this.actor?.items) {
@@ -359,12 +497,68 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 this.items = []
             }
 
-            // Fix: System uses 'Player Character' and 'NPC' (capitalized with space)
-            if (this.actorType === 'Player Character' || this.actorType === 'NPC') {
+            // Build per-build item index (Phase 2 performance)
+            this.#buildItemIndex()
+
+            if (isSupportedActorType(this.actorType)) {
                 await this.#buildCharacterActions()
-            } else if (!this.actor) {
-                this.#buildMultipleTokenActions()
             }
+
+            // Add multi-token execution actions when multiple supported actors of the same type are selected.
+            // This is intentionally additive and does not change the single-token experience.
+            if (this.isMultiTokenSelection) {
+                this.#buildMultiTokenExecutionActions()
+            }
+
+            // Phase 4: run registered build extensions (additive).
+            // Skip partial builds to avoid accidental duplication when Core requests a single group refresh.
+            if (!isPartialBuild) {
+                const token = this.token ?? canvas?.tokens?.controlled?.[0] ?? null
+                await runBuildExtensions({
+                    handler: this,
+                    actor: this.actor,
+                    token,
+                    actors: Array.isArray(this.actors) ? this.actors : [this.actor].filter(Boolean),
+                    isMultiTokenSelection: !!this.isMultiTokenSelection,
+                    delimiter: this.delimiter
+                })
+            }
+
+            // Phase 3: store cache for single-token full builds only.
+            if (!isPartialBuild && !this.isMultiTokenSelection) {
+                const token = this.token ?? canvas?.tokens?.controlled?.[0] ?? null
+                const cacheKey = token?.id ?? null
+                if (cacheKey && Array.isArray(this._uesrpgBuildRecords) && this._uesrpgBuildRecords.length > 0) {
+                    const actorId = this.actor?.id ?? null
+                    const actorMod = safeModifiedTime(this.actor)
+                    const tokenMod = safeModifiedTime(token?.document)
+
+                    setBuildCacheEntry(cacheKey, {
+                        actorId,
+                        tokenId: token?.id ?? null,
+                        actorMod,
+                        tokenMod,
+                        records: this._uesrpgBuildRecords
+                    })
+                    // actor->cacheKey indexing is handled by cache.js
+                }
+            }
+        }
+
+        /**
+         * Build multi-token execution actions (Attacks, Spells, Talents) without altering effects behavior.
+         * @private
+         */
+        #buildMultiTokenExecutionActions () {
+            const mode = game.settings.get(MODULE.ID, 'multiTokenItemExecutionMode') ?? 'intersection'
+            if (mode === 'off') return
+
+            const actors = Array.isArray(this.actors) ? this.actors.filter(a => !!a) : []
+            if (actors.length < 2) return
+
+            this.#buildMultiTokenAttacks(actors, mode)
+            this.#buildMultiTokenSpells(actors, mode)
+            this.#buildMultiTokenTalents(actors, mode)
         }
 
         /**
@@ -378,8 +572,61 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             await this.#buildSpells()
             await this.#buildFeatures()
             await this.#buildActionsTracker()
+            await this.#buildResourceBadges()
             await this.#buildStatusEffects()
             await this.#buildActiveEffects()
+        }
+
+        /**
+         * Build display-only resource badges (AP/SP/MP/Luck).
+         * Display-only avoids action-economy coupling.
+         * @private
+         */
+        async #buildResourceBadges () {
+            if (!this.actor || this.isMultiTokenSelection) return
+
+            // Place badges into the existing Utility group so they appear for users
+            // who have an older, persisted HUD layout which does not include the
+            // newer "Resources" group.
+            // This is display-only and intentionally avoids action-economy coupling.
+            const groupData = GROUP.utility
+            const actions = []
+
+            const apV = Number(this.actor.system?.action_points?.value ?? 0)
+            const apM = Number(this.actor.system?.action_points?.max ?? 0)
+            const spV = Number(this.actor.system?.stamina?.value ?? 0)
+            const spM = Number(this.actor.system?.stamina?.max ?? 0)
+            const mpV = Number(this.actor.system?.magicka?.value ?? 0)
+            const mpM = Number(this.actor.system?.magicka?.max ?? 0)
+            const lpV = Number(this.actor.system?.luck_points?.value ?? 0)
+            const lpM = Number(this.actor.system?.luck_points?.max ?? 0)
+
+            actions.push({
+                id: 'badge-ap',
+                name: `AP ${apV}/${apM}`,
+                encodedValue: ['utility', 'badge-ap'].join(this.delimiter),
+                cssClass: 'disabled shrink uesrpg-resource-badge'
+            })
+            actions.push({
+                id: 'badge-sp',
+                name: `SP ${spV}/${spM}`,
+                encodedValue: ['utility', 'badge-sp'].join(this.delimiter),
+                cssClass: 'disabled shrink uesrpg-resource-badge'
+            })
+            actions.push({
+                id: 'badge-mp',
+                name: `MP ${mpV}/${mpM}`,
+                encodedValue: ['utility', 'badge-mp'].join(this.delimiter),
+                cssClass: 'disabled shrink uesrpg-resource-badge'
+            })
+            actions.push({
+                id: 'badge-lp',
+                name: `Luck ${lpV}/${lpM}`,
+                encodedValue: ['utility', 'badge-lp'].join(this.delimiter),
+                cssClass: 'disabled shrink uesrpg-resource-badge'
+            })
+
+            this.addActions(actions, groupData)
         }
 
         /**
@@ -673,11 +920,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const actions = []
 
             // Attack (Melee) - if melee weapon equipped
-            const hasMeleeWeapon = this.actor?.items?.some(item =>
-                item.type === 'weapon' &&
-                item.system?.equipped &&
-                item.system?.attackMode === 'melee'
-            )
+            const hasMeleeWeapon = this._itemIndex?.hasEquippedMeleeWeapon === true
             if (hasMeleeWeapon) {
                 actions.push({
                     id: 'attack-melee',
@@ -687,11 +930,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             }
 
             // Attack (Ranged) - if ranged weapon equipped
-            const hasRangedWeapon = this.actor?.items?.some(item =>
-                item.type === 'weapon' &&
-                item.system?.equipped &&
-                item.system?.attackMode === 'ranged'
-            )
+            const hasRangedWeapon = this._itemIndex?.hasEquippedRangedWeapon === true
             if (hasRangedWeapon) {
                 actions.push({
                     id: 'attack-ranged',
@@ -757,11 +996,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             })
 
             // Reload Weapon (only if ranged weapon equipped)
-            const rangedWeapon = this.actor.items?.find(i =>
-                i.type === 'weapon' &&
-                i.system?.equipped === true &&
-                i.system?.attackMode === 'ranged'
-            )
+            const rangedWeapon = this.#getEquippedRangedWeapon()?.item ?? null
 
             if (rangedWeapon) {
                 const reloadState = rangedWeapon.system?.reloadState ?? {}
@@ -819,10 +1054,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const actions = []
 
             // Get active combat style special actions
-            const activeCombatStyle = this.actor.items?.find(item =>
-                item.type === 'combatStyle' &&
-                item.system?.active
-            )
+            const activeCombatStyle = this.#getActiveCombatStyle()?.item ?? null
 
             // Basic special actions always available
             const specialActions = ['arise', 'shove', 'grapple', 'trip', 'disarm']
@@ -917,8 +1149,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 }
             } else {
                 // For PCs, use skill items (excluding magic category)
-                for (const [itemId, itemData] of this.#getItemsIterator()) {
-                    if (!itemData || itemData.type !== 'skill') continue
+                for (const [itemId, itemData] of this.#getItemsOfType('skill')) {
+                    if (!itemData) continue
                     if (itemData.system?.category === 'magic') continue
 
                     const tn = itemData.system?.value || 0
@@ -951,8 +1183,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const groupData = { id: groupId, type: 'system' }
             const actions = []
 
-            for (const [itemId, itemData] of this.#getItemsIterator()) {
-                if (!itemData || itemData.type !== 'magicSkill') continue
+            for (const [itemId, itemData] of this.#getItemsOfType('magicSkill')) {
+                if (!itemData) continue
 
                 const tn = itemData.system?.value || 0
                 const name = itemData.name
@@ -981,8 +1213,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const groupData = { id: groupId, type: 'system' }
             const actions = []
 
-            for (const [itemId, itemData] of this.#getItemsIterator()) {
-                if (!itemData || itemData.type !== 'combatStyle') continue
+            for (const [itemId, itemData] of this.#getItemsOfType('combatStyle')) {
+                if (!itemData) continue
 
                 const value = itemData.system?.value || 0
                 const rank = itemData.system?.rank || 0
@@ -1026,8 +1258,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const groupData = { id: groupId, type: 'system' }
             const actions = []
 
-            for (const [itemId, itemData] of this.#getItemsIterator()) {
-                if (!itemData || itemData.type !== 'weapon') continue
+            for (const [itemId, itemData] of this.#getItemsOfType('weapon')) {
+                if (!itemData) continue
 
                 // ALWAYS show weapons, equipped or not
                 const equipped = itemData.system?.equipped || false
@@ -1057,8 +1289,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const groupData = { id: groupId, type: 'system' }
             const actions = []
 
-            for (const [itemId, itemData] of this.#getItemsIterator()) {
-                if (!itemData || itemData.type !== 'armor') continue
+            for (const [itemId, itemData] of this.#getItemsOfType('armor')) {
+                if (!itemData) continue
 
                 // ALWAYS show armor, equipped or not
                 const equipped = itemData.system?.equipped || false
@@ -1088,9 +1320,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const groupData = { id: groupId, type: 'system' }
             const actions = []
 
-            for (const [itemId, itemData] of this.#getItemsIterator()) {
-                if (!itemData || itemData.type !== 'item') continue
-                if (itemData.type === 'spell') continue // Exclude spells
+            for (const [itemId, itemData] of this.#getItemsOfType('item')) {
+                if (!itemData) continue
 
                 // ALWAYS show items, equipped or not
                 const equipped = itemData.system?.equipped || false
@@ -1118,8 +1349,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const groupData = { id: groupId, type: 'system' }
             const actions = []
 
-            for (const [itemId, itemData] of this.#getItemsIterator()) {
-                if (!itemData || itemData.type !== 'ammunition') continue
+            for (const [itemId, itemData] of this.#getItemsOfType('ammunition')) {
+                if (!itemData) continue
 
                 const quantity = itemData.system?.quantity || 0
                 const equipped = itemData.system?.equipped || false
@@ -1152,8 +1383,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             // Group spells by school
             const spellsBySchool = new Map()
 
-            for (const [itemId, itemData] of this.#getItemsIterator()) {
-                if (!itemData || itemData.type !== 'spell') continue
+            for (const [itemId, itemData] of this.#getItemsOfType('spell')) {
+                if (!itemData) continue
 
                 const school = itemData.system?.school || 'other'
                 if (!spellsBySchool.has(school)) {
@@ -1222,8 +1453,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const activated = []
             const passive = []
 
-            for (const [itemId, itemData] of this.#getItemsIterator()) {
-                if (!itemData || itemData.type !== 'talent') continue
+            for (const [itemId, itemData] of this.#getItemsOfType('talent')) {
+                if (!itemData) continue
                 const built = this.#buildFeatureAction(itemId, itemData, 'talent')
                 all.push(built.action)
                 if (built.isActivated) activated.push(built)
@@ -1256,8 +1487,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const activated = []
             const passive = []
 
-            for (const [itemId, itemData] of this.#getItemsIterator()) {
-                if (!itemData || itemData.type !== 'trait') continue
+            for (const [itemId, itemData] of this.#getItemsOfType('trait')) {
+                if (!itemData) continue
                 const built = this.#buildFeatureAction(itemId, itemData, 'trait')
                 all.push(built.action)
                 if (built.isActivated) activated.push(built)
@@ -1290,8 +1521,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const activated = []
             const passive = []
 
-            for (const [itemId, itemData] of this.#getItemsIterator()) {
-                if (!itemData || itemData.type !== 'power') continue
+            for (const [itemId, itemData] of this.#getItemsOfType('power')) {
+                if (!itemData) continue
                 const built = this.#buildFeatureAction(itemId, itemData, 'power')
                 all.push(built.action)
                 if (built.isActivated) activated.push(built)
