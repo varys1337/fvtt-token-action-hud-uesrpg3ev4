@@ -191,11 +191,39 @@
     min-width: min-content;
 }
 
-/* AP tracker category button (non-interactive, always visible among tabs) */
+/*
+ * Phase 3: Resource badges (display-only)
+ * Render as compact pills and avoid suggesting interactivity.
+ */
+#token-action-hud .tah-action-button.uesrpg-resource-badge {
+    height: 22px;
+    min-width: min-content;
+    padding: 0 8px;
+    font-size: var(--font-size-12);
+    letter-spacing: 0.2px;
+    opacity: 0.95;
+}
+
+#token-action-hud .tah-action-button.uesrpg-resource-badge.disabled {
+    opacity: 0.85;
+}
+
+/*
+ * Action tracker tab control.
+ * - Interactive by default (left click increments, right click decrements)
+ * - JS toggles `.disabled` + `aria-disabled` when no eligible actor is controlled
+ */
 .tah-ap-tracker {
+    pointer-events: auto;
+    cursor: pointer;
+    opacity: 1;
+}
+
+.tah-ap-tracker.disabled,
+.tah-ap-tracker[aria-disabled="true"] {
     pointer-events: none;
     cursor: default;
-    opacity: 1;
+    opacity: 0.75;
 }
 
 .tah-group-button > :is(.fa, .fas) {
