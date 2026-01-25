@@ -571,6 +571,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             await this.#buildInventory()
             await this.#buildSpells()
             await this.#buildFeatures()
+            await this.#buildActionsTracker()
             await this.#buildResourceBadges()
             await this.#buildStatusEffects()
             await this.#buildActiveEffects()
@@ -1539,5 +1540,33 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             if (passive.length > 0) this.addActions(passive.map(e => e.action), groupDataPassive)
         }
 
+        /**
+         * Build Actions tracker display
+         * Shows current/max action points as a non-clickable action button
+         * @private
+         */
+        async #buildActionsTracker () {
+            if (!this.actor) return
+
+            const groupId = 'actionsTracker'
+            const groupData = { id: groupId, type: 'system' }
+            const actions = []
+
+            // Get action points from system.action_points
+            const currentAP = Number(this.actor.system?.action_points?.value ?? 0)
+            const maxAP = Number(this.actor.system?.action_points?.max ?? 0)
+
+            // Create a single action that displays "Actions X/Y"
+            actions.push({
+                id: 'action-points-tracker',
+                name: `Actions ${currentAP}/${maxAP}`,
+                encodedValue: ['actionsTracker', 'action-points-tracker'].join(this.delimiter),
+                cssClass: 'disabled' // Non-clickable
+            })
+
+            if (actions.length > 0) {
+                this.addActions(actions, groupData)
+            }
+        }
     }
 })
