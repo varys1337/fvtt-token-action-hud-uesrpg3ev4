@@ -22,11 +22,10 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
             // NOTE: Do not include Talents/Traits/Powers here.
             // Those now support activation and have dedicated click behavior.
-            const renderable = ['skill', 'magicSkill', 'combatStyle', 'weapon', 'armor', 'item', 'ammunition', 'spell']
+            const renderable = ['skill', 'profession', 'magicSkill', 'combatStyle', 'weapon', 'armor', 'item', 'ammunition', 'spell']
 
             if (renderable.includes(actionTypeId) && this.isRenderItem()) {
-                const rendered = this.#renderItemSheet(this.actor, actionId)
-                if (rendered) return
+                return this.doRenderItem(this.actor, actionId)
             }
 
             // If single actor is selected
@@ -107,20 +106,6 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {object} group The group
          */
         async handleGroupClick (event, group) {}
-
-        /**
-         * Render an item sheet by id if it exists on the actor.
-         * @private
-         * @param {Actor} actor
-         * @param {string} actionId
-         * @returns {boolean} true if a sheet render was attempted
-         */
-        #renderItemSheet (actor, actionId) {
-            const item = actor?.items?.get?.(actionId) ?? null
-            if (!item || !item.sheet?.render) return false
-            item.sheet.render(true)
-            return true
-        }
 
         /**
          * Handle action
@@ -481,7 +466,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 }
 
                 // Dynamically import OpposedWorkflow from system
-                const { OpposedWorkflow } = await import('/systems/uesrpg-3ev4/module/combat/opposed-workflow.js')
+                const { OpposedWorkflow } = await import('/systems/uesrpg-3ev4/src/core/combat/opposed-workflow.js')
 
                 // Create pending attack workflow
                 const attackerToken = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
@@ -797,7 +782,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                                    Array.from(canvas.tokens.placeables.values()).find(t => t.isTargeted)
 
                 // Dynamically import SkillOpposedWorkflow from system
-                const { SkillOpposedWorkflow } = await import('/systems/uesrpg-3ev4/module/skills/opposed-workflow.js')
+                const { SkillOpposedWorkflow } = await import('/systems/uesrpg-3ev4/src/core/skills/opposed-workflow.js')
 
                 // Create pending skill opposed workflow for special action
                 await SkillOpposedWorkflow.createPending({
@@ -1003,7 +988,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                                        Array.from(canvas.tokens.placeables.values()).find(t => t.isTargeted)
                     
                     if (targetToken) {
-                        const { SkillOpposedWorkflow } = await import('/systems/uesrpg-3ev4/module/skills/opposed-workflow.js')
+                        const { SkillOpposedWorkflow } = await import('/systems/uesrpg-3ev4/src/core/skills/opposed-workflow.js')
                         await SkillOpposedWorkflow.createPending({
                             attackerTokenUuid: this.token?.document?.uuid || actor.uuid,
                             defenderTokenUuid: targetToken?.document?.uuid,
@@ -1135,9 +1120,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 }
 
                 const [{ MagicOpposedWorkflow }, { classifySpellForRouting, shouldUseTargetedSpellWorkflow }, { getSpellRangeType, getSpellAoEConfig, placeAoETemplateAndCollectTargets }] = await Promise.all([
-                    import('/systems/uesrpg-3ev4/module/magic/opposed-workflow.js'),
-                    import('/systems/uesrpg-3ev4/module/magic/spell-routing.js'),
-                    import('/systems/uesrpg-3ev4/module/magic/spell-range.js')
+                    import('/systems/uesrpg-3ev4/src/core/magic/opposed-workflow.js'),
+                    import('/systems/uesrpg-3ev4/src/core/magic/spell-routing.js'),
+                    import('/systems/uesrpg-3ev4/src/core/magic/spell-range.js')
                 ])
 
                 const targetsFromUser = Array.from(game.user?.targets ?? [])
@@ -1221,7 +1206,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             // Activated feature: use the system activation executor (same as the sheet).
             if (activation?.enabled === true) {
                 try {
-                    const { executeItemActivation } = await import('/systems/uesrpg-3ev4/module/system/activation/activation-executor.js')
+                    const { executeItemActivation } = await import('/systems/uesrpg-3ev4/src/core/system/activation/activation-executor.js')
                     await executeItemActivation({
                         item: feature,
                         actor,
