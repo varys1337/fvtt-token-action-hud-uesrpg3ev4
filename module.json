@@ -10,10 +10,10 @@
   ],
   "url": "This is auto replaced",
   "flags": {},
-  "version": "1.0.6",
+  "version": "1.0.11",
   "compatibility": {
-    "minimum": "11",
-    "verified": "13"
+    "minimum": "13",
+    "verified": "13.351"
   },
   "esmodules": [
     "./scripts/init.js"

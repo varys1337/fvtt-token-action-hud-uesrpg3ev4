@@ -1,7 +1,20 @@
 import { MODULE } from './constants.js'
-import { isSupportedActorType } from './utils.js'
+import { isSupportedActorType, getSystemModulePath } from './utils.js'
 
 export let RollHandler = null
+
+/**
+ * Resolve a system-relative import path for the active system.
+ * Falls back to the canonical UESRPG system id to preserve compatibility in older installs.
+ * @param {string} relativePath
+ * @returns {string}
+ */
+function _systemImportPath (relativePath) {
+    const p = getSystemModulePath(relativePath)
+    if (p) return p
+    const clean = String(relativePath ?? '').replace(/^\/+/, '')
+    return `/systems/uesrpg-3ev4/${clean}`
+}
 
 Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
     /**
@@ -17,15 +30,34 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          */
         async handleActionClick (event, encodedValue) {
             const [actionTypeId, actionId] = encodedValue.split('|')
-
             const isRightClick = event?.button === 2 || event?.type === 'contextmenu'
+
+            // We may not have this.actor in multi-token contexts; resolve controlled tokens once for safe fallbacks.
+            const controlledTokens = (canvas?.tokens?.controlled ?? [])
+                .filter((token) => isSupportedActorType(token?.actor?.type))
+
+            // Right-click on embedded items/features/spells should open the relevant Item sheet, matching prior behavior.
+            // Guard against multi-token selection (no single actor context) to avoid null-actor errors.
+            if (isRightClick) {
+                const itemSheetTypes = ['weapon', 'armor', 'item', 'ammunition', 'spell', 'talent', 'trait', 'power']
+                if (itemSheetTypes.includes(actionTypeId)) {
+                    const actor = this.actor ?? (controlledTokens.length === 1 ? controlledTokens[0]?.actor : null)
+                    const item = actor?.items?.get ? actor.items.get(actionId) : null
+                    if (item?.sheet && typeof item.sheet.render === 'function') {
+                        item.sheet.render(true)
+                        return
+                    }
+                }
+            }
 
             // NOTE: Do not include Talents/Traits/Powers here.
             // Those now support activation and have dedicated click behavior.
             const renderable = ['skill', 'profession', 'magicSkill', 'combatStyle', 'weapon', 'armor', 'item', 'ammunition', 'spell']
 
+            // Core render-item behavior must have a single actor context.
             if (renderable.includes(actionTypeId) && this.isRenderItem()) {
-                return this.doRenderItem(this.actor, actionId)
+                const actor = this.actor ?? (controlledTokens.length === 1 ? controlledTokens[0]?.actor : null)
+                if (actor) return this.doRenderItem(actor, actionId)
             }
 
             // If single actor is selected
@@ -33,9 +65,6 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 await this.#handleAction(event, this.actor, this.token, actionTypeId, actionId)
                 return
             }
-
-            const controlledTokens = (canvas?.tokens?.controlled ?? [])
-                .filter((token) => isSupportedActorType(token?.actor?.type))
 
             // Multi-token execution actions (Attacks, Spells, Talents).
             // These actions are built only when multiple tokens are selected.
@@ -466,7 +495,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 }
 
                 // Dynamically import OpposedWorkflow from system
-                const { OpposedWorkflow } = await import('/systems/uesrpg-3ev4/src/core/combat/opposed-workflow.js')
+                const { OpposedWorkflow } = await import(_systemImportPath('src/core/combat/opposed-workflow.js'))
 
                 // Create pending attack workflow
                 const attackerToken = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
@@ -537,7 +566,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
                 // Create spell selection dialog
                 const spellList = spells.map(spell =>
-                    `<option value="${spell.id}">${spell.name} (MP ${spell.system?.mpCost || 0})</option>`
+                    `<option value="${spell.id}">${spell.name} (MP ${spell.system?.cost || 0})</option>`
                 ).join('')
 
                 const content = `
@@ -782,7 +811,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                                    Array.from(canvas.tokens.placeables.values()).find(t => t.isTargeted)
 
                 // Dynamically import SkillOpposedWorkflow from system
-                const { SkillOpposedWorkflow } = await import('/systems/uesrpg-3ev4/src/core/skills/opposed-workflow.js')
+                const { SkillOpposedWorkflow } = await import(_systemImportPath('src/core/skills/opposed-workflow.js'))
 
                 // Create pending skill opposed workflow for special action
                 await SkillOpposedWorkflow.createPending({
@@ -988,7 +1017,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                                        Array.from(canvas.tokens.placeables.values()).find(t => t.isTargeted)
                     
                     if (targetToken) {
-                        const { SkillOpposedWorkflow } = await import('/systems/uesrpg-3ev4/src/core/skills/opposed-workflow.js')
+                        const { SkillOpposedWorkflow } = await import(_systemImportPath('src/core/skills/opposed-workflow.js'))
                         await SkillOpposedWorkflow.createPending({
                             attackerTokenUuid: this.token?.document?.uuid || actor.uuid,
                             defenderTokenUuid: targetToken?.document?.uuid,
@@ -1119,11 +1148,17 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                     return
                 }
 
-                const [{ MagicOpposedWorkflow }, { classifySpellForRouting, shouldUseTargetedSpellWorkflow }, { getSpellRangeType, getSpellAoEConfig, placeAoETemplateAndCollectTargets }] = await Promise.all([
-                    import('/systems/uesrpg-3ev4/src/core/magic/opposed-workflow.js'),
-                    import('/systems/uesrpg-3ev4/src/core/magic/spell-routing.js'),
-                    import('/systems/uesrpg-3ev4/src/core/magic/spell-range.js')
+                const [{ MagicOpposedWorkflow }, { shouldUseTargetedSpellWorkflow, shouldUseModernSpellWorkflow }, { getSpellRangeType, getSpellAoEConfig, placeAoETemplateAndCollectTargets }, { SKILL_DIFFICULTIES }] = await Promise.all([
+                    import(_systemImportPath('src/core/magic/opposed-workflow.js')),
+                    import(_systemImportPath('src/core/magic/spell-routing.js')),
+                    import(_systemImportPath('src/core/magic/spell-range.js')),
+                    import(_systemImportPath('src/core/skills/skill-tn.js'))
                 ])
+
+                // Mirror the actor sheet flow: after spell selection, present spell options dialog.
+                // If the user cancels, do not proceed.
+                const spellOptions = await this.#showSpellOptionsDialog({ actor, spell, SKILL_DIFFICULTIES })
+                if (spellOptions === null) return
 
                 const targetsFromUser = Array.from(game.user?.targets ?? [])
                 const rangeType = getSpellRangeType(spell)
@@ -1140,8 +1175,6 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                     targets = Array.isArray(placed.targets) ? placed.targets : []
                 }
 
-                const cls = classifySpellForRouting(spell)
-
                 // Targeted (attack/healing/direct) spells route into the opposed workflow when at least one defender is present.
                 if (shouldUseTargetedSpellWorkflow(spell, targets)) {
                     const defenderTokenUuids = Array.from(targets)
@@ -1156,7 +1189,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                         attackerTokenUuid: casterToken.document?.uuid ?? casterToken.uuid,
                         defenderTokenUuids,
                         spellUuid: spell.uuid,
-                        spellOptions: {},
+                        spellOptions,
                         castActionType: 'primary',
                         aoe: aoeConfig,
                         isAoE: rangeType === 'aoe'
@@ -1164,25 +1197,166 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                     return
                 }
 
-                // Untargeted spells: use the modern unopposed workflow.
-                if (!cls.isTargeted) {
+                // All spells use the modern casting engine when not routing into a targeted pending card.
+                // This matches the actor sheet behavior (shouldUseModernSpellWorkflow currently returns true for all spells).
+                if (shouldUseModernSpellWorkflow?.(spell) ?? true) {
                     await MagicOpposedWorkflow.castUnopposed({
                         attackerActorUuid: actor.uuid,
                         attackerTokenUuid: casterToken.document?.uuid ?? casterToken.uuid,
                         spellUuid: spell.uuid,
-                        spellOptions: {},
+                        spellOptions,
                         castActionType: 'primary'
                     })
                     return
                 }
-
-                // Targeted spell without targets.
-                ui.notifications.warn('Select at least one target for this spell.')
             } catch (error) {
                 console.error('Error casting spell:', error)
                 // Fallback to opening spell sheet
                 spell.sheet.render(true)
             }
+        }
+
+        /**
+         * Spell options dialog (mirrors the ActorSheet "Cast Magic" follow-up dialog).
+         * Keeps TokenHUD casting semantics aligned with the system sheets.
+         *
+         * @private
+         * @param {object} params
+         * @param {Actor} params.actor
+         * @param {Item} params.spell
+         * @param {Array<{key:string,label:string,mod:number}>} params.SKILL_DIFFICULTIES
+         * @returns {Promise<object|null>} spellOptions or null if cancelled
+         */
+        async #showSpellOptionsDialog ({ actor, spell, SKILL_DIFFICULTIES }) {
+            const wpTotal = Number(actor?.system?.characteristics?.wp?.total ?? 0)
+            const wpBonus = Math.floor(wpTotal / 10)
+            const hasOverload = Boolean(spell?.system?.hasOverload)
+            const baseCost = Number(spell?.system?.cost ?? 0)
+
+            // Talent hooks (scaffolding only; does not apply mechanics beyond flags passed through)
+            const hasOverchargeTalent = actor?.items?.some?.(i => i?.type === 'talent' && String(i?.name ?? '').trim() === 'Overcharge') ?? false
+            const hasMagickaCyclingTalent = actor?.items?.some?.(i => i?.type === 'talent' && String(i?.name ?? '').trim() === 'Magicka Cycling') ?? false
+
+            const difficulties = Array.isArray(SKILL_DIFFICULTIES) ? SKILL_DIFFICULTIES : []
+            // Ensure 'average' default selected, if present.
+            const difficultyOptionsHtml = difficulties.map(df => {
+                const sign = Number(df?.mod ?? 0) >= 0 ? '+' : ''
+                const key = String(df?.key ?? 'average')
+                const sel = key === 'average' ? 'selected' : ''
+                const label = String(df?.label ?? key)
+                const mod = Number(df?.mod ?? 0)
+                return `<option value="${key}" ${sel}>${label} (${sign}${mod})</option>`
+            }).join('\n')
+
+            const overloadText = String(spell?.system?.overloadEffect ?? '').trim() || 'double cost for enhanced effect'
+
+            const content = `
+                <form class="uesrpg-spell-options">
+                    <h3>${spell.name}</h3>
+                    <div class="form-group">
+                        <label>MP Cost: <b>${baseCost}</b></label>
+                    </div>
+                    <div class="form-group" style="margin-bottom:8px; margin-top:8px;">
+                        <label style="display:block;"><b>Difficulty</b></label>
+                        <select name="difficultyKey" style="width:100%;">
+                            ${difficultyOptionsHtml}
+                        </select>
+                    </div>
+                    <div class="form-group" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+                        <label style="margin:0;"><b>Manual Modifier</b></label>
+                        <input type="number" name="manualModifier" value="0" style="width:120px; text-align:center;" />
+                    </div>
+                    <hr style="margin: 10px 0;"/>
+                    <div class="form-group" id="restrainGroup" style="margin-top: 8px;">
+                        <label style="display: flex; align-items: center; gap: 8px;">
+                            <input type="checkbox" name="restrain" id="restrainCheckbox" ${!hasOverload ? 'checked' : ''} />
+                            <span><b>Spell Restraint</b> (reduce cost by ${wpBonus} to min 1)</span>
+                        </label>
+                    </div>
+                    ${hasOverload ? `
+                        <div class="form-group" id="overloadGroup" style="margin-top: 8px;">
+                            <label style="display: flex; align-items: center; gap: 8px;">
+                                <input type="checkbox" name="overload" id="overloadCheckbox" />
+                                <span><b>Overload</b> (${overloadText})</span>
+                            </label>
+                        </div>
+                    ` : ''}
+                    ${hasOverchargeTalent ? `
+                        <div class="form-group" style="margin-top: 8px;">
+                            <label style="display: flex; align-items: center; gap: 8px;">
+                                <input type="checkbox" name="overcharge" />
+                                <span><b>Overcharge</b> (talent option; not yet implemented)</span>
+                            </label>
+                        </div>
+                    ` : ''}
+                    ${hasMagickaCyclingTalent ? `
+                        <div class="form-group" style="margin-top: 8px;">
+                            <label style="display: flex; align-items: center; gap: 8px;">
+                                <input type="checkbox" name="magickaCycling" />
+                                <span><b>Magicka Cycling</b> (talent option; not yet implemented)</span>
+                            </label>
+                        </div>
+                    ` : ''}
+                </form>
+            `
+
+            return await new Promise((resolve) => {
+                const dialog = new Dialog({
+                    title: 'Spell Options',
+                    content,
+                    buttons: {
+                        cast: {
+                            label: 'Cast',
+                            callback: (html) => {
+                                const root = html instanceof HTMLElement ? html : html?.[0]
+                                const form = root?.querySelector?.('form')
+                                const difficultyKey = String(form?.difficultyKey?.value ?? 'average')
+                                const manualModifierRaw = form?.manualModifier?.value ?? '0'
+                                const manualModifier = Number.parseInt(String(manualModifierRaw ?? '0'), 10) || 0
+                                resolve({
+                                    isRestrained: form?.restrain?.checked ?? false,
+                                    isOverloaded: form?.overload?.checked ?? false,
+                                    useOvercharge: form?.overcharge?.checked ?? false,
+                                    useMagickaCycling: form?.magickaCycling?.checked ?? false,
+                                    difficultyKey,
+                                    manualModifier,
+                                    restraintValue: wpBonus,
+                                    baseCost
+                                })
+                            }
+                        },
+                        cancel: { label: 'Cancel', callback: () => resolve(null) }
+                    },
+                    default: 'cast',
+                    render: (html) => {
+                        if (!hasOverload) return
+                        const restrainCheckbox = html.find?.('#restrainCheckbox')?.[0]
+                        const overloadCheckbox = html.find?.('#overloadCheckbox')?.[0]
+                        const restrainGroup = html.find?.('#restrainGroup')?.[0]
+                        const overloadGroup = html.find?.('#overloadGroup')?.[0]
+
+                        if (restrainCheckbox && overloadCheckbox) {
+                            restrainCheckbox.addEventListener('change', (e) => {
+                                if (e?.target?.checked) {
+                                    overloadCheckbox.checked = false
+                                    if (overloadGroup) overloadGroup.style.opacity = '0.5'
+                                } else {
+                                    if (overloadGroup) overloadGroup.style.opacity = '1'
+                                }
+                            })
+                            overloadCheckbox.addEventListener('change', (e) => {
+                                if (e?.target?.checked) {
+                                    restrainCheckbox.checked = false
+                                    if (restrainGroup) restrainGroup.style.opacity = '0.5'
+                                } else {
+                                    if (restrainGroup) restrainGroup.style.opacity = '1'
+                                }
+                            })
+                        }
+                    }
+                }, { width: 420 })
+                dialog.render(true)
+            })
         }
 
         /**
@@ -1206,7 +1380,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             // Activated feature: use the system activation executor (same as the sheet).
             if (activation?.enabled === true) {
                 try {
-                    const { executeItemActivation } = await import('/systems/uesrpg-3ev4/src/core/system/activation/activation-executor.js')
+                    const { executeItemActivation } = await import(_systemImportPath('src/core/system/activation/activation-executor.js'))
                     await executeItemActivation({
                         item: feature,
                         actor,
@@ -1245,12 +1419,60 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {string} actionId The action id
          */
         async #handleUtilityAction (token, actionId) {
+            const actor = token?.actor
             switch (actionId) {
             case 'endTurn':
                 if (game.combat?.current?.tokenId === token.id) {
                     await game.combat?.nextTurn()
                 }
                 break
+
+            // Resource quick-access (Utility tab)
+            case 'resource-health': {
+                if (!actor) break
+                try {
+                    const { HPTempHPDialog } = await import(_systemImportPath('src/ui/apps/hp-temp-hp-dialog.js'))
+                    if (HPTempHPDialog?.show) await HPTempHPDialog.show(actor)
+                } catch (error) {
+                    console.error(`${MODULE.ID} | Failed opening Health dialog`, error)
+                }
+                break
+            }
+            case 'resource-stamina': {
+                if (!actor) break
+                try {
+                    const mod = await import(_systemImportPath('src/core/stamina/stamina-dialog.js'))
+                    const openStaminaDialog = mod?.openStaminaDialog
+                    if (typeof openStaminaDialog === 'function') await openStaminaDialog(actor)
+                } catch (error) {
+                    console.error(`${MODULE.ID} | Failed opening Stamina dialog`, error)
+                }
+                break
+            }
+            case 'resource-magicka': {
+                // Pre-wired for future system support. Silent no-op if not implemented.
+                if (!actor) break
+                try {
+                    const mod = await import(_systemImportPath('src/core/magic/magicka-dialog.js'))
+                    const openMagickaDialog = mod?.openMagickaDialog
+                    if (typeof openMagickaDialog === 'function') await openMagickaDialog(actor)
+                } catch (_e) {
+                    // No-op until the system exposes a Magicka dialog entrypoint.
+                }
+                break
+            }
+            case 'resource-luck': {
+                // Pre-wired for future system support. Silent no-op if not implemented.
+                if (!actor) break
+                try {
+                    const mod = await import(_systemImportPath('src/core/luck/luck-dialog.js'))
+                    const openLuckDialog = mod?.openLuckDialog
+                    if (typeof openLuckDialog === 'function') await openLuckDialog(actor)
+                } catch (_e) {
+                    // No-op until the system exposes a Luck dialog entrypoint.
+                }
+                break
+            }
             }
         }
     }

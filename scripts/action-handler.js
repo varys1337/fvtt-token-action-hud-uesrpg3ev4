@@ -186,6 +186,56 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
         }
 
         /**
+         * Normalize rank values (guards legacy typos)
+         * @private
+         * @param {string|number|null|undefined} rank
+         * @returns {string}
+         */
+        #normalizeRankValue (rank) {
+            if (rank === null || rank === undefined) return ''
+            const r = String(rank).toLowerCase()
+            if (r === 'journeymain') return 'journeyman'
+            return r
+        }
+
+        /**
+         * Abbreviate a UESRPG rank for compact HUD display.
+         * Supports string ranks (untrained/novice/apprentice/journeyman/adept/expert/master)
+         * and numeric ranks (0..5 -> novice..master).
+         * @private
+         * @param {string|number|null|undefined} rank
+         * @returns {string}
+         */
+        #abbrRank (rank) {
+            if (rank === null || rank === undefined || rank === '') return ''
+            if (typeof rank === 'number' && Number.isFinite(rank)) {
+                const n = Number(rank)
+                const byNum = {
+                    [-1]: 'UT',
+                    0: 'Nv',
+                    1: 'Ap',
+                    2: 'Jr',
+                    3: 'Ad',
+                    4: 'Ex',
+                    5: 'Ma'
+                }
+                return byNum[n] ?? ''
+            }
+
+            const r = this.#normalizeRankValue(rank)
+            const byKey = {
+                untrained: 'UT',
+                novice: 'Nv',
+                apprentice: 'Ap',
+                journeyman: 'Jr',
+                adept: 'Ad',
+                expert: 'Ex',
+                master: 'Ma'
+            }
+            return byKey[r] ?? ''
+        }
+
+        /**
          * Build tooltip HTML for a feature item.
          * @private
          * @param {object} itemData
@@ -578,22 +628,24 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
         }
 
         /**
-         * Build display-only resource badges (AP/SP/MP/Luck).
-         * Display-only avoids action-economy coupling.
+         * Build resource quick-access buttons (Health/Magicka/Stamina/Luck).
+         * Buttons mirror the Actor sheet sidebar resource menus where available.
          * @private
          */
         async #buildResourceBadges () {
             if (!this.actor || this.isMultiTokenSelection) return
 
-            // Place badges into the existing Utility group so they appear for users
-            // who have an older, persisted HUD layout which does not include the
-            // newer "Resources" group.
-            // This is display-only and intentionally avoids action-economy coupling.
+            // Keep resources in the Utility tab for consistent discoverability.
+            // Use the base "utility" group to avoid layout breakage if the resources subgroup
+            // is filtered/omitted by user layout settings.
+            // These are safe quick-access entrypoints (no resource mutation).
             const groupData = GROUP.utility
             const actions = []
 
-            const apV = Number(this.actor.system?.action_points?.value ?? 0)
-            const apM = Number(this.actor.system?.action_points?.max ?? 0)
+            // Health is represented by system.hp + system.tempHP in the current system schema.
+            const hpV = Number(this.actor.system?.hp?.value ?? 0)
+            const hpM = Number(this.actor.system?.hp?.max ?? 0)
+            const tempHP = Number(this.actor.system?.tempHP ?? this.actor.system?.hp?.temp ?? 0)
             const spV = Number(this.actor.system?.stamina?.value ?? 0)
             const spM = Number(this.actor.system?.stamina?.max ?? 0)
             const mpV = Number(this.actor.system?.magicka?.value ?? 0)
@@ -602,28 +654,28 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const lpM = Number(this.actor.system?.luck_points?.max ?? 0)
 
             actions.push({
-                id: 'badge-ap',
-                name: `AP ${apV}/${apM}`,
-                encodedValue: ['utility', 'badge-ap'].join(this.delimiter),
-                cssClass: 'disabled shrink uesrpg-resource-badge'
+                id: 'resource-health',
+                name: tempHP > 0 ? `Health ${hpV}/${hpM} (+${tempHP})` : `Health ${hpV}/${hpM}`,
+                encodedValue: ['utility', 'resource-health'].join(this.delimiter),
+                cssClass: 'shrink uesrpg-resource-badge'
             })
             actions.push({
-                id: 'badge-sp',
-                name: `SP ${spV}/${spM}`,
-                encodedValue: ['utility', 'badge-sp'].join(this.delimiter),
-                cssClass: 'disabled shrink uesrpg-resource-badge'
+                id: 'resource-magicka',
+                name: `Magicka ${mpV}/${mpM}`,
+                encodedValue: ['utility', 'resource-magicka'].join(this.delimiter),
+                cssClass: 'shrink uesrpg-resource-badge'
             })
             actions.push({
-                id: 'badge-mp',
-                name: `MP ${mpV}/${mpM}`,
-                encodedValue: ['utility', 'badge-mp'].join(this.delimiter),
-                cssClass: 'disabled shrink uesrpg-resource-badge'
+                id: 'resource-stamina',
+                name: `Stamina ${spV}/${spM}`,
+                encodedValue: ['utility', 'resource-stamina'].join(this.delimiter),
+                cssClass: 'shrink uesrpg-resource-badge'
             })
             actions.push({
-                id: 'badge-lp',
+                id: 'resource-luck',
                 name: `Luck ${lpV}/${lpM}`,
-                encodedValue: ['utility', 'badge-lp'].join(this.delimiter),
-                cssClass: 'disabled shrink uesrpg-resource-badge'
+                encodedValue: ['utility', 'resource-luck'].join(this.delimiter),
+                cssClass: 'shrink uesrpg-resource-badge'
             })
 
             this.addActions(actions, groupData)
@@ -1155,12 +1207,14 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
                     const tn = itemData.system?.value || 0
                     const name = itemData.name
+                    const rankAbbr = this.#abbrRank(itemData.system?.rank)
 
                     actions.push({
                         id: itemId,
                         name,
                         encodedValue: ['skill', itemId].join(this.delimiter),
-                        info1: { text: `${tn}%` }
+                        info1: { text: `${tn}%` },
+                        ...(rankAbbr ? { info2: { text: rankAbbr } } : {})
                     })
                 }
             }
@@ -1188,12 +1242,14 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
                 const tn = itemData.system?.value || 0
                 const name = itemData.name
+                const rankAbbr = this.#abbrRank(itemData.system?.rank)
 
                 actions.push({
                     id: itemId,
                     name,
                     encodedValue: ['magicSkill', itemId].join(this.delimiter),
-                    info1: { text: `${tn}%` }
+                    info1: { text: `${tn}%` },
+                    ...(rankAbbr ? { info2: { text: rankAbbr } } : {})
                 })
             }
 
@@ -1217,7 +1273,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 if (!itemData) continue
 
                 const value = itemData.system?.value || 0
-                const rank = itemData.system?.rank || 0
+                const rankAbbr = this.#abbrRank(itemData.system?.rank)
                 const active = itemData.system?.active || false
                 const name = itemData.name
 
@@ -1225,8 +1281,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                     id: itemId,
                     name,
                     encodedValue: ['combatStyle', itemId].join(this.delimiter),
-                    info1: { text: `${value}` },
-                    info2: { text: `Rank ${rank}` },
+                    info1: { text: `${value}%` },
+                    ...(rankAbbr ? { info2: { text: rankAbbr } } : {}),
                     cssClass: active ? 'active' : ''
                 })
             }

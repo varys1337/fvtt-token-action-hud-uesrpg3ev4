@@ -69,6 +69,7 @@ export const SPELL_SCHOOLS = [
     'destruction',
     'illusion',
     'mysticism',
+    'necromancy',
     'restoration',
     'other'
 ]
@@ -100,6 +101,7 @@ export const GROUP = {
     destructionSpells: { id: 'destructionSpells', name: 'tokenActionHud.uesrpg3ev4.destructionSpells', type: 'system' },
     illusionSpells: { id: 'illusionSpells', name: 'tokenActionHud.uesrpg3ev4.illusionSpells', type: 'system' },
     mysticismSpells: { id: 'mysticismSpells', name: 'tokenActionHud.uesrpg3ev4.mysticismSpells', type: 'system' },
+    necromancySpells: { id: 'necromancySpells', name: 'tokenActionHud.uesrpg3ev4.necromancySpells', type: 'system' },
     restorationSpells: { id: 'restorationSpells', name: 'tokenActionHud.uesrpg3ev4.restorationSpells', type: 'system' },
     otherSpells: { id: 'otherSpells', name: 'tokenActionHud.uesrpg3ev4.otherSpells', type: 'system' },
 

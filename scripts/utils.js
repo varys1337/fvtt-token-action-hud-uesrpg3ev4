@@ -6,7 +6,7 @@ export let Utils = null
  * System actor types supported by this Token Action HUD system module.
  * IMPORTANT: These are the system's canonical Actor type ids, not localized display strings.
  */
-export const SUPPORTED_ACTOR_TYPES = new Set(['Player Character', 'NPC'])
+export const SUPPORTED_ACTOR_TYPES = new Set(['Player Character', 'NPC', 'Group'])
 
 /**
  * Check whether an actor type is supported.

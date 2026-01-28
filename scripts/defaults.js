@@ -56,6 +56,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                     { ...groups.destructionSpells, nestId: 'spells_destruction' },
                     { ...groups.illusionSpells, nestId: 'spells_illusion' },
                     { ...groups.mysticismSpells, nestId: 'spells_mysticism' },
+                    { ...groups.necromancySpells, nestId: 'spells_necromancy' },
                     { ...groups.restorationSpells, nestId: 'spells_restoration' },
                     { ...groups.otherSpells, nestId: 'spells_other' }
                 ]
