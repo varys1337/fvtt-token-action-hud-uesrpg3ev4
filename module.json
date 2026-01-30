@@ -10,7 +10,7 @@
   ],
   "url": "This is auto replaced",
   "flags": {},
-  "version": "This is auto replaced",
+  "version": "1.0.0-RC.83.1",
   "compatibility": {
     "minimum": "11",
     "verified": "13"
@@ -18,8 +18,7 @@
   "esmodules": [
     "./scripts/init.js"
   ],
-  "scripts": [
-  ],
+  "scripts": [],
   "styles": [
     "./styles/token-action-hud-uesrpg3ev4.css"
   ],
@@ -62,8 +61,8 @@
     }
   },
   "socket": false,
-  "manifest": "This is auto replaced",
-  "download": "This is auto replaced",
+  "manifest": "https://github.com/varys1337/fvtt-token-action-hud-uesrpg3ev4/releases/download/v1.0.0-RC.83.1/module.json",
+  "download": "https://github.com/varys1337/fvtt-token-action-hud-uesrpg3ev4/releases/download/v1.0.0-RC.83.1/fvtt-token-action-hud-uesrpg3ev4-1.0.0-RC.83.1.zip",
   "readme": "https://github.com/Larkinabout/fvtt-token-action-hud-template#readme",
   "protected": false,
   "coreTranslation": false,
