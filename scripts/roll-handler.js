@@ -17,24 +17,46 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
         async handleActionClick (event, encodedValue) {
             const [actionTypeId, actionId] = encodedValue.split('|')
 
+            const knownCharacters = ['Player Character', 'NPC']
+
+            const isRightClick = (event?.button === 2) || (event?.which === 3) || (event?.type === 'contextmenu')
+
+            // Determine controlled tokens early (needed for safe render / right-click behaviors)
+            const controlledTokens = canvas.tokens.controlled
+                .filter((token) => knownCharacters.includes(token.actor?.type))
+
+            // Resolve a stable actor/token context for single-token interactions.
+            // (When multi-token is selected, this.actor may be null and doRenderItem would throw.)
+            const contextToken = this.token ?? (controlledTokens.length === 1 ? controlledTokens[0] : null)
+            const contextActor = this.actor ?? contextToken?.actor ?? null
+
+            // Right-click: open item/feature/spell sheets (legacy behavior).
+            // This should never attempt to execute actions or create chat cards.
+            if (isRightClick && contextActor) {
+                const rightClickRenderable = ['weapon', 'armor', 'item', 'ammunition', 'spell', 'talent', 'trait', 'power']
+                if (rightClickRenderable.includes(actionTypeId)) {
+                    const item = contextActor.items?.get?.(actionId) ?? null
+                    if (item?.sheet) {
+                        item.sheet.render(true)
+                        return
+                    }
+                }
+            }
+
             // NOTE: Do not include Talents/Traits/Powers here.
             // Those now support activation and have dedicated click behavior.
             const renderable = ['skill', 'profession', 'magicSkill', 'combatStyle', 'weapon', 'armor', 'item', 'ammunition', 'spell']
 
             if (renderable.includes(actionTypeId) && this.isRenderItem()) {
-                return this.doRenderItem(this.actor, actionId)
+                // Guard: multi-token selection may not set this.actor.
+                if (contextActor) return this.doRenderItem(contextActor, actionId)
             }
-
-            const knownCharacters = ['Player Character', 'NPC']
 
             // If single actor is selected
-            if (this.actor) {
-                await this.#handleAction(event, this.actor, this.token, actionTypeId, actionId)
+            if (contextActor) {
+                await this.#handleAction(event, contextActor, contextToken, actionTypeId, actionId)
                 return
             }
-
-            const controlledTokens = canvas.tokens.controlled
-                .filter((token) => knownCharacters.includes(token.actor?.type))
 
             // Multi-token execution actions (Attacks, Spells, Talents).
             // These actions are built only when multiple tokens are selected.
@@ -998,6 +1020,13 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const spell = actor.items.get(actionId)
             if (!spell) return
 
+            // Right-click: always open the sheet.
+            const isRightClick = (event?.button === 2) || (event?.which === 3) || (event?.type === 'contextmenu')
+            if (isRightClick) {
+                spell.sheet.render(true)
+                return
+            }
+
             try {
                 const casterToken = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
                 if (!casterToken) {
@@ -1005,11 +1034,16 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                     return
                 }
 
-                const [{ MagicOpposedWorkflow }, { classifySpellForRouting, shouldUseTargetedSpellWorkflow }, { getSpellRangeType, getSpellAoEConfig, placeAoETemplateAndCollectTargets }] = await Promise.all([
+                const [{ MagicOpposedWorkflow }, { shouldUseModernSpellWorkflow, shouldUseTargetedSpellWorkflow }, { SKILL_DIFFICULTIES }, { getSpellRangeType, getSpellAoEConfig, placeAoETemplateAndCollectTargets }] = await Promise.all([
                     import('/systems/uesrpg-3ev4/module/magic/opposed-workflow.js'),
                     import('/systems/uesrpg-3ev4/module/magic/spell-routing.js'),
+                    import('/systems/uesrpg-3ev4/module/skills/skill-tn.js'),
                     import('/systems/uesrpg-3ev4/module/magic/spell-range.js')
                 ])
+
+                // Spell options (same as sheet flow)
+                const spellOptions = await this.#showSpellOptionsDialog({ actor, spell, SKILL_DIFFICULTIES })
+                if (spellOptions === null) return
 
                 const targetsFromUser = Array.from(game.user?.targets ?? [])
                 const rangeType = getSpellRangeType(spell)
@@ -1026,8 +1060,6 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                     targets = Array.isArray(placed.targets) ? placed.targets : []
                 }
 
-                const cls = classifySpellForRouting(spell)
-
                 // Targeted (attack/healing/direct) spells route into the opposed workflow when at least one defender is present.
                 if (shouldUseTargetedSpellWorkflow(spell, targets)) {
                     const defenderTokenUuids = Array.from(targets)
@@ -1042,7 +1074,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                         attackerTokenUuid: casterToken.document?.uuid ?? casterToken.uuid,
                         defenderTokenUuids,
                         spellUuid: spell.uuid,
-                        spellOptions: {},
+                        spellOptions,
                         castActionType: 'primary',
                         aoe: aoeConfig,
                         isAoE: rangeType === 'aoe'
@@ -1051,12 +1083,12 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 }
 
                 // Untargeted spells: use the modern unopposed workflow.
-                if (!cls.isTargeted) {
+                if (shouldUseModernSpellWorkflow(spell)) {
                     await MagicOpposedWorkflow.castUnopposed({
                         attackerActorUuid: actor.uuid,
                         attackerTokenUuid: casterToken.document?.uuid ?? casterToken.uuid,
                         spellUuid: spell.uuid,
-                        spellOptions: {},
+                        spellOptions,
                         castActionType: 'primary'
                     })
                     return
@@ -1069,6 +1101,108 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 // Fallback to opening spell sheet
                 spell.sheet.render(true)
             }
+        }
+
+        /**
+         * Show spell options dialog (sheet-equivalent flow).
+         * Returns null if cancelled.
+         * @private
+         * @param {object} params
+         * @param {Actor} params.actor
+         * @param {Item} params.spell
+         * @param {Array} params.SKILL_DIFFICULTIES
+         * @returns {Promise<object|null>}
+         */
+        async #showSpellOptionsDialog ({ actor, spell, SKILL_DIFFICULTIES }) {
+            const baseCost = Number(spell?.system?.cost ?? spell?.system?.mpCost ?? 0)
+            const hasOverload = spell?.system?.hasOverload === true
+            const overloadEffect = String(spell?.system?.overloadEffect ?? '').trim()
+
+            const defaultDifficultyKey = 'average'
+            const defaultRestraint = false
+            const defaultOverload = false
+            const defaultCastingBonus = 0
+
+            const wp = Number(actor?.system?.characteristics?.wp?.total ?? 0)
+            const maxRestraint = Math.max(0, Math.floor(wp / 10))
+
+            const difficultyOptions = (Array.isArray(SKILL_DIFFICULTIES) ? SKILL_DIFFICULTIES : [])
+                .map(d => `<option value="${d.key}" ${d.key === defaultDifficultyKey ? 'selected' : ''}>${d.label} (${d.mod >= 0 ? '+' : ''}${d.mod})</option>`)
+                .join('')
+
+            const content = `
+                <form class="uesrpg-spell-options">
+                    <div class="form-group">
+                        <label>Difficulty</label>
+                        <select name="difficultyKey">${difficultyOptions}</select>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Casting Bonus / Penalty</label>
+                        <input type="number" name="castingBonus" value="${defaultCastingBonus}" step="1" />
+                        <p class="notes">Applied to casting TN</p>
+                    </div>
+
+                    <hr />
+
+                    <div class="form-group">
+                        <label>Restraint</label>
+                        <input type="checkbox" name="restraint" ${defaultRestraint ? 'checked' : ''} />
+                        <p class="notes">Up to ${maxRestraint} MP can be refunded on success (based on WP ${wp})</p>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Restraint Amount</label>
+                        <input type="number" name="restraintAmount" value="0" min="0" max="${maxRestraint}" step="1" />
+                    </div>
+
+                    ${hasOverload ? `
+                    <hr />
+                    <div class="form-group">
+                        <label>Overload</label>
+                        <input type="checkbox" name="overload" ${defaultOverload ? 'checked' : ''} />
+                        <p class="notes">Base Cost: ${baseCost} MP</p>
+                        ${overloadEffect ? `<p class="notes"><b>Overload Effect:</b> ${overloadEffect}</p>` : ''}
+                    </div>` : ''}
+                </form>
+            `
+
+            return new Promise((resolve) => {
+                new Dialog({
+                    title: `Cast Spell: ${spell.name}`,
+                    content,
+                    buttons: {
+                        cast: {
+                            label: 'Cast',
+                            callback: (html) => {
+                                const form = html.find('form')[0]
+                                const fd = new FormData(form)
+
+                                const difficultyKey = String(fd.get('difficultyKey') || defaultDifficultyKey)
+                                const castingBonus = Number(fd.get('castingBonus') || 0)
+                                const restraint = fd.get('restraint') === 'on'
+                                const restraintAmountRaw = Number(fd.get('restraintAmount') || 0)
+                                const restraintAmount = Math.max(0, Math.min(maxRestraint, restraintAmountRaw))
+                                const overload = hasOverload ? (fd.get('overload') === 'on') : false
+
+                                resolve({
+                                    difficultyKey,
+                                    castingBonus,
+                                    restraint,
+                                    restraintAmount: restraint ? restraintAmount : 0,
+                                    overload
+                                })
+                            }
+                        },
+                        cancel: {
+                            label: 'Cancel',
+                            callback: () => resolve(null)
+                        }
+                    },
+                    default: 'cast',
+                    close: () => resolve(null)
+                }).render(true)
+            })
         }
 
         /**
@@ -1136,6 +1270,34 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 if (game.combat?.current?.tokenId === token.id) {
                     await game.combat?.nextTurn()
                 }
+                break
+
+            case 'resource-health':
+                try {
+                    const { HPTempHPDialog } = await import('/systems/uesrpg-3ev4/module/apps/hp-temp-hp-dialog.js')
+                    await HPTempHPDialog.show(token?.actor)
+                } catch (err) {
+                    console.error('token-action-hud-uesrpg3ev4 | Health dialog failed', err)
+                    ui.notifications.error('Failed to open Health dialog. See console for details.')
+                }
+                break
+
+            case 'resource-stamina':
+                try {
+                    const { openStaminaDialog } = await import('/systems/uesrpg-3ev4/module/stamina/stamina-dialog.js')
+                    await openStaminaDialog(token?.actor)
+                } catch (err) {
+                    console.error('token-action-hud-uesrpg3ev4 | Stamina dialog failed', err)
+                    ui.notifications.error('Failed to open Stamina dialog. See console for details.')
+                }
+                break
+
+            // Prewired for upcoming sheet-equivalent dialogs (system support pending)
+            case 'resource-magicka':
+                ui.notifications.info('Magicka dialog is not available in this system build yet.')
+                break
+            case 'resource-luck':
+                ui.notifications.info('Luck dialog is not available in this system build yet.')
                 break
             }
         }

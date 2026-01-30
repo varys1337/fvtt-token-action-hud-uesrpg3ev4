@@ -147,6 +147,57 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             return `${label} ${t}`
         }
 
+
+        /**
+         * Normalize rank values (guards legacy typos)
+         * @private
+         * @param {string|number|null|undefined} rank
+         * @returns {string}
+         */
+        #normalizeRankValue (rank) {
+            if (rank === null || rank === undefined) return ''
+            const r = String(rank).toLowerCase()
+            if (r === 'journeymain') return 'journeyman'
+            return r
+        }
+
+        /**
+         * Abbreviate a UESRPG rank for compact HUD display.
+         * Supports string ranks (untrained/novice/apprentice/journeyman/adept/expert/master)
+         * and numeric ranks (0..5 -> novice..master).
+         * @private
+         * @param {string|number|null|undefined} rank
+         * @returns {string}
+         */
+        #abbrRank (rank) {
+            if (rank === null || rank === undefined || rank === '') return ''
+            if (typeof rank === 'number' && Number.isFinite(rank)) {
+                const n = Number(rank)
+                const byNum = {
+                    [-1]: 'UT',
+                    0: 'Nv',
+                    1: 'Ap',
+                    2: 'Jr',
+                    3: 'Ad',
+                    4: 'Ex',
+                    5: 'Ma'
+                }
+                return byNum[n] ?? ''
+            }
+
+            const r = this.#normalizeRankValue(rank)
+            const byKey = {
+                untrained: 'UT',
+                novice: 'Nv',
+                apprentice: 'Ap',
+                journeyman: 'Jr',
+                adept: 'Ad',
+                expert: 'Ex',
+                master: 'Ma'
+            }
+            return byKey[r] ?? ''
+        }
+
         /**
          * Build tooltip HTML for a feature item.
          * @private
@@ -378,6 +429,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             await this.#buildSpells()
             await this.#buildFeatures()
             await this.#buildActionsTracker()
+            await this.#buildResourceBadges()
             await this.#buildStatusEffects()
             await this.#buildActiveEffects()
         }
@@ -923,12 +975,14 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
                     const tn = itemData.system?.value || 0
                     const name = itemData.name
+                    const rankAbbr = this.#abbrRank(itemData.system?.rank)
 
                     actions.push({
                         id: itemId,
                         name,
                         encodedValue: ['skill', itemId].join(this.delimiter),
-                        info1: { text: `${tn}%` }
+                        info1: { text: `${tn}%` },
+                        ...(rankAbbr ? { info2: { text: rankAbbr } } : {})
                     })
                 }
             }
@@ -956,12 +1010,14 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
                 const tn = itemData.system?.value || 0
                 const name = itemData.name
+                const rankAbbr = this.#abbrRank(itemData.system?.rank)
 
                 actions.push({
                     id: itemId,
                     name,
                     encodedValue: ['magicSkill', itemId].join(this.delimiter),
-                    info1: { text: `${tn}%` }
+                    info1: { text: `${tn}%` },
+                    ...(rankAbbr ? { info2: { text: rankAbbr } } : {})
                 })
             }
 
@@ -985,7 +1041,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 if (!itemData || itemData.type !== 'combatStyle') continue
 
                 const value = itemData.system?.value || 0
-                const rank = itemData.system?.rank || 0
+                const rankAbbr = this.#abbrRank(itemData.system?.rank)
                 const active = itemData.system?.active || false
                 const name = itemData.name
 
@@ -993,8 +1049,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                     id: itemId,
                     name,
                     encodedValue: ['combatStyle', itemId].join(this.delimiter),
-                    info1: { text: `${value}` },
-                    info2: { text: `Rank ${rank}` },
+                    info1: { text: `${value}%` },
+                    ...(rankAbbr ? { info2: { text: rankAbbr } } : {}),
                     cssClass: active ? 'active' : ''
                 })
             }
@@ -1307,6 +1363,59 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
             if (activated.length > 0) this.addActions(activated.map(e => e.action), groupDataActivated)
             if (passive.length > 0) this.addActions(passive.map(e => e.action), groupDataPassive)
+        }
+
+
+        /**
+         * Build resource quick-access buttons (Health/Magicka/Stamina/Luck).
+         * Buttons mirror the Actor sheet sidebar resource menus where available.
+         * @private
+         */
+        async #buildResourceBadges () {
+            if (!this.actor || this.isMultiTokenSelection) return
+
+            // Keep resources in the Utility tab for consistent discoverability.
+            // Use the base "utility" group to avoid layout breakage if the resources subgroup
+            // is filtered/omitted by user layout settings.
+            const groupData = GROUP.utility
+            const actions = []
+
+            const hpV = Number(this.actor.system?.hp?.value ?? 0)
+            const hpM = Number(this.actor.system?.hp?.max ?? 0)
+            const tempHP = Number(this.actor.system?.tempHP ?? this.actor.system?.hp?.temp ?? 0)
+            const spV = Number(this.actor.system?.stamina?.value ?? 0)
+            const spM = Number(this.actor.system?.stamina?.max ?? 0)
+            const mpV = Number(this.actor.system?.magicka?.value ?? 0)
+            const mpM = Number(this.actor.system?.magicka?.max ?? 0)
+            const lpV = Number(this.actor.system?.luck_points?.value ?? 0)
+            const lpM = Number(this.actor.system?.luck_points?.max ?? 0)
+
+            actions.push({
+                id: 'resource-health',
+                name: tempHP > 0 ? `Health ${hpV}/${hpM} (+${tempHP})` : `Health ${hpV}/${hpM}`,
+                encodedValue: ['utility', 'resource-health'].join(this.delimiter),
+                cssClass: 'shrink uesrpg-resource-badge'
+            })
+            actions.push({
+                id: 'resource-magicka',
+                name: `Magicka ${mpV}/${mpM}`,
+                encodedValue: ['utility', 'resource-magicka'].join(this.delimiter),
+                cssClass: 'shrink uesrpg-resource-badge'
+            })
+            actions.push({
+                id: 'resource-stamina',
+                name: `Stamina ${spV}/${spM}`,
+                encodedValue: ['utility', 'resource-stamina'].join(this.delimiter),
+                cssClass: 'shrink uesrpg-resource-badge'
+            })
+            actions.push({
+                id: 'resource-luck',
+                name: `Luck ${lpV}/${lpM}`,
+                encodedValue: ['utility', 'resource-luck'].join(this.delimiter),
+                cssClass: 'shrink uesrpg-resource-badge'
+            })
+
+            this.addActions(actions, groupData)
         }
 
         /**
