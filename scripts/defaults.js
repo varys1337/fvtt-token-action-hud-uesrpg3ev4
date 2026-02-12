@@ -30,6 +30,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 id: 'skills',
                 name: coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.skills'),
                 groups: [
+                    { ...groups.characteristics, nestId: 'skills_characteristics' },
                     { ...groups.coreSkills, nestId: 'skills_coreSkills' },
                     { ...groups.magicSkills, nestId: 'skills_magicSkills' },
                     { ...groups.combatStyles, nestId: 'skills_combatStyles' }
@@ -81,14 +82,6 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 groups: [
                     { ...groups.statusEffects, nestId: 'effects_statusEffects' },
                     { ...groups.activeEffects, nestId: 'effects_magicEffects' }
-                ]
-            },
-            {
-                nestId: 'actionsTracker',
-                id: 'actionsTracker',
-                name: coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.actionsTracker'),
-                groups: [
-                    { ...groups.actionsTracker, nestId: 'actionsTracker_actionsTracker' }
                 ]
             },
             {

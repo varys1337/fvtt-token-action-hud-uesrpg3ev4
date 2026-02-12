@@ -18,15 +18,15 @@ export function register (coreUpdate) {
         }
     })
 
-    game.settings.register(MODULE.ID, 'passiveFeatureLeftClick', {
-        name: game.i18n.localize('tokenActionHud.uesrpg3ev4.settings.passiveFeatureLeftClick.name'),
-        hint: game.i18n.localize('tokenActionHud.uesrpg3ev4.settings.passiveFeatureLeftClick.hint'),
+    game.settings.register(MODULE.ID, 'passiveFeatureRightClick', {
+        name: game.i18n.localize('tokenActionHud.uesrpg3ev4.settings.passiveFeatureRightClick.name'),
+        hint: game.i18n.localize('tokenActionHud.uesrpg3ev4.settings.passiveFeatureRightClick.hint'),
         scope: 'client',
         config: true,
         type: String,
         choices: {
-            chat: game.i18n.localize('tokenActionHud.uesrpg3ev4.settings.passiveFeatureLeftClick.choices.chat'),
-            sheet: game.i18n.localize('tokenActionHud.uesrpg3ev4.settings.passiveFeatureLeftClick.choices.sheet')
+            chat: game.i18n.localize('tokenActionHud.uesrpg3ev4.settings.passiveFeatureRightClick.choices.chat'),
+            sheet: game.i18n.localize('tokenActionHud.uesrpg3ev4.settings.passiveFeatureRightClick.choices.sheet')
         },
         default: 'chat',
         onChange: (value) => {
@@ -55,6 +55,7 @@ export function register (coreUpdate) {
         }
     })
 
+    // Unified debug toggle: controls all HUD debug and diagnostics logging.
     game.settings.register(MODULE.ID, 'debug', {
         name: game.i18n.localize('tokenActionHud.uesrpg3ev4.settings.debug.name'),
         hint: game.i18n.localize('tokenActionHud.uesrpg3ev4.settings.debug.hint'),

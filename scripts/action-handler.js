@@ -1,6 +1,6 @@
 // System Module Imports
 import { ACTION_TYPE, GROUP, MODULE, SPELL_SCHOOLS } from './constants.js'
-import { isSupportedActor, isSupportedActorType, debugLog } from './utils.js'
+import { isSupportedActor, isSupportedActorType, debugLog, diagLog, getSystemModulePath } from './utils.js'
 import {
     getBuildCacheEntry,
     invalidateBuildCacheByActorId,
@@ -15,6 +15,19 @@ export let ActionHandler = null
 
 // Phase 4: keep cache lifecycle in a dedicated module for clarity.
 registerBuildCacheInvalidationHooks()
+
+/**
+ * Resolve a system-relative import path for the active system.
+ * Falls back to the canonical UESRPG system id to preserve compatibility in older installs.
+ * @param {string} relativePath
+ * @returns {string}
+ */
+function _systemImportPath (relativePath) {
+    const p = getSystemModulePath(relativePath)
+    if (p) return p
+    const clean = String(relativePath ?? '').replace(/^\/+/, '')
+    return `/systems/uesrpg-3ev4/${clean}`
+}
 
 Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
     /**
@@ -57,6 +70,17 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             secondary: 30,
             action: 40,
             passive: 90
+        }
+
+        /**
+         * Diagnostics helper for omitted groups.
+         * @private
+         * @param {string} groupId
+         * @param {string} reason
+         * @param {object} extra
+         */
+        #logOmittedGroup (groupId, reason, extra = {}) {
+            diagLog('Group omitted', { groupId, reason, ...extra })
         }
 
         /**
@@ -135,32 +159,6 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             }
 
             return ''
-        }
-
-        /**
-         * Get action points (AP) display text for the current actor.
-         * @private
-         * @returns {string}
-         */
-        #getActionPointsText () {
-            const currentAP = Number(this.actor?.system?.action_points?.value ?? 0)
-            const maxAP = Number(this.actor?.system?.action_points?.max ?? 0)
-            return `${currentAP}/${maxAP}`
-        }
-
-        /**
-         * Build a compact AP badge action.
-         * Rendered as a disabled, shrink button so it does not create a new UI region/tab.
-         * @private
-         * @returns {object}
-         */
-        #buildActionPointsBadgeAction () {
-            return {
-                id: 'ap-badge',
-                name: `AP ${this.#getActionPointsText()}`,
-                encodedValue: ['utility', 'ap-badge'].join(this.delimiter),
-                cssClass: 'disabled shrink uesrpg-ap-badge'
-            }
         }
 
         /**
@@ -401,10 +399,13 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             /** @type {{ id: string, item: any } | null} */
             let equippedRangedWeapon = null
             /** @type {{ id: string, item: any } | null} */
+            let equippedMeleeWeapon = null
+            /** @type {{ id: string, item: any } | null} */
             let activeCombatStyle = null
 
             let hasEquippedMeleeWeapon = false
             let hasEquippedRangedWeapon = false
+            const activeCombatStyleId = this.#resolveActiveCombatStyleId()
 
             const entries = this.#getItemsIterator()
             for (const entry of entries) {
@@ -425,8 +426,13 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                         hasEquippedRangedWeapon = true
                         if (!equippedRangedWeapon) equippedRangedWeapon = { id: itemId, item }
                     }
-                } else if (type === 'combatStyle' && item.system?.active && !activeCombatStyle) {
-                    activeCombatStyle = { id: itemId, item }
+                    if (mode === 'melee' && !equippedMeleeWeapon) {
+                        equippedMeleeWeapon = { id: itemId, item }
+                    }
+                } else if (type === 'combatStyle' && !activeCombatStyle) {
+                    const isActive = (activeCombatStyleId && String(itemId) === String(activeCombatStyleId)) ||
+                        (!activeCombatStyleId && item.system?.active === true)
+                    if (isActive) activeCombatStyle = { id: itemId, item }
                 }
             }
 
@@ -435,8 +441,23 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 byType,
                 hasEquippedMeleeWeapon,
                 hasEquippedRangedWeapon,
+                equippedMeleeWeapon,
                 equippedRangedWeapon,
                 activeCombatStyle
+            }
+        }
+
+        /**
+         * Resolve the active combat style id from system flags (refactor source of truth).
+         * @private
+         * @returns {string|null}
+         */
+        #resolveActiveCombatStyleId () {
+            try {
+                const raw = this.actor?.getFlag?.('uesrpg-3ev4', 'activeCombatStyleId')
+                return raw ? String(raw) : null
+            } catch (_e) {
+                return null
             }
         }
 
@@ -459,6 +480,15 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          */
         #getEquippedRangedWeapon () {
             return this._itemIndex?.equippedRangedWeapon ?? null
+        }
+
+        /**
+         * Get the first equipped melee weapon (if any) from the item index.
+         * @private
+         * @returns {{ id: string, item: any } | null}
+         */
+        #getEquippedMeleeWeapon () {
+            return this._itemIndex?.equippedMeleeWeapon ?? null
         }
 
         /**
@@ -485,6 +515,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             // When multiple tokens are selected, we derive a deterministic actor set here.
             this.isMultiTokenSelection = false
 
+            if (this.actor && !isSupportedActor(this.actor)) return
+
             if (!this.actor) {
                 const controlledTokens = (canvas?.tokens?.controlled ?? []).filter(t => isSupportedActor(t?.actor))
                 if (!controlledTokens.length) return
@@ -506,6 +538,11 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             }
 
             this.actorType = this.actor?.type
+            diagLog('HUD build actor types', {
+                actorType: this.actorType,
+                supported: isSupportedActorType(this.actorType),
+                isMultiTokenSelection: this.isMultiTokenSelection
+            })
 
             // Phase 3: apply conservative cache for single-token selection only.
             // - We key by Token id to account for token-local state (status effects/overlays).
@@ -621,14 +658,13 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             await this.#buildInventory()
             await this.#buildSpells()
             await this.#buildFeatures()
-            await this.#buildActionsTracker()
             await this.#buildResourceBadges()
             await this.#buildStatusEffects()
             await this.#buildActiveEffects()
         }
 
         /**
-         * Build resource quick-access buttons (Health/Magicka/Stamina/Luck).
+         * Build resource quick-access buttons (Health/Magicka/Stamina/Luck) and rest actions.
          * Buttons mirror the Actor sheet sidebar resource menus where available.
          * @private
          */
@@ -676,6 +712,18 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 name: `Luck ${lpV}/${lpM}`,
                 encodedValue: ['utility', 'resource-luck'].join(this.delimiter),
                 cssClass: 'shrink uesrpg-resource-badge'
+            })
+
+            // Add rest actions (only show for single token selection)
+            actions.push({
+                id: 'shortRest',
+                name: 'Short Rest',
+                encodedValue: ['utility', 'shortRest'].join(this.delimiter)
+            })
+            actions.push({
+                id: 'longRest',
+                name: 'Long Rest',
+                encodedValue: ['utility', 'longRest'].join(this.delimiter)
             })
 
             this.addActions(actions, groupData)
@@ -741,6 +789,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
             if (actions.length > 0) {
                 this.addActions(actions, groupData)
+            } else {
+                this.#logOmittedGroup(groupId, 'no equipped attacks')
             }
         }
 
@@ -899,6 +949,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
             if (actions.length > 0) {
                 this.addActions(actions, groupData)
+            } else {
+                this.#logOmittedGroup(groupId, 'no magic skills')
             }
         }
 
@@ -941,6 +993,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
             if (actions.length > 0) {
                 this.addActions(actions, groupData)
+            } else {
+                this.#logOmittedGroup(groupId, 'no combat styles')
             }
         }
 
@@ -972,22 +1026,22 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const actions = []
 
             // Attack (Melee) - if melee weapon equipped
-            const hasMeleeWeapon = this._itemIndex?.hasEquippedMeleeWeapon === true
-            if (hasMeleeWeapon) {
+            const meleeWeapon = this.#getEquippedMeleeWeapon()
+            if (meleeWeapon?.id) {
                 actions.push({
                     id: 'attack-melee',
                     name: this.#withAttackTracker(coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.attackMelee')),
-                    encodedValue: ['attack', 'melee'].join(this.delimiter)
+                    encodedValue: ['attack', meleeWeapon.id].join(this.delimiter)
                 })
             }
 
             // Attack (Ranged) - if ranged weapon equipped
-            const hasRangedWeapon = this._itemIndex?.hasEquippedRangedWeapon === true
-            if (hasRangedWeapon) {
+            const rangedWeapon = this.#getEquippedRangedWeapon()
+            if (rangedWeapon?.id) {
                 actions.push({
                     id: 'attack-ranged',
                     name: this.#withAttackTracker(coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.attackRanged')),
-                    encodedValue: ['attack', 'ranged'].join(this.delimiter)
+                    encodedValue: ['attack', rangedWeapon.id].join(this.delimiter)
                 })
             }
 
@@ -1007,6 +1061,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
             if (actions.length > 0) {
                 this.addActions(actions, groupData)
+            } else {
+                this.#logOmittedGroup(groupId, 'no weapons')
             }
         }
 
@@ -1065,6 +1121,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
             if (actions.length > 0) {
                 this.addActions(actions, groupData)
+            } else {
+                this.#logOmittedGroup(groupId, 'no armor')
             }
         }
 
@@ -1093,6 +1151,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
             if (actions.length > 0) {
                 this.addActions(actions, groupData)
+            } else {
+                this.#logOmittedGroup(groupId, 'no items')
             }
         }
 
@@ -1105,34 +1165,39 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const groupData = { id: groupId, type: 'system' }
             const actions = []
 
-            // Get active combat style special actions
-            const activeCombatStyle = this.#getActiveCombatStyle()?.item ?? null
+            try {
+                const { buildSpecialActionsForActor } = await import(_systemImportPath('src/core/combat/combat-style-utils.js'))
+                const list = typeof buildSpecialActionsForActor === 'function'
+                    ? (buildSpecialActionsForActor(this.actor) ?? [])
+                    : []
 
-            // Basic special actions always available
-            const specialActions = ['arise', 'shove', 'grapple', 'trip', 'disarm']
-
-            specialActions.forEach(action => {
-                actions.push({
-                    id: action,
-                    name: coreModule.api.Utils.i18n(`tokenActionHud.uesrpg3ev4.${action}`),
-                    encodedValue: ['specialAction', action].join(this.delimiter)
-                })
-            })
-
-            // Add combat style specific actions if available
-            if (activeCombatStyle?.system?.specialActions) {
-                const styleActions = activeCombatStyle.system.specialActions || []
-                styleActions.forEach(action => {
+                list.forEach(sa => {
+                    const id = String(sa?.id ?? '').trim()
+                    if (!id) return
                     actions.push({
-                        id: action.id || action.name,
-                        name: action.name,
-                        encodedValue: ['specialAction', action.id || action.name].join(this.delimiter)
+                        id,
+                        name: sa?.name ?? id,
+                        encodedValue: ['specialAction', id].join(this.delimiter),
+                        cssClass: sa?.known ? 'active' : ''
+                    })
+                })
+            } catch (err) {
+                debugLog('Special actions import failed, using fallback list', err)
+                const fallback = ['arise', 'bash', 'blindOpponent', 'disarm', 'feint', 'forceMovement', 'resist', 'trip']
+                fallback.forEach(action => {
+                    const label = action.replace(/([A-Z])/g, ' $1').replace(/^./, c => c.toUpperCase())
+                    actions.push({
+                        id: action,
+                        name: label,
+                        encodedValue: ['specialAction', action].join(this.delimiter)
                     })
                 })
             }
 
             if (actions.length > 0) {
                 this.addActions(actions, groupData)
+            } else {
+                this.#logOmittedGroup(groupId, 'no ammunition')
             }
         }
 
@@ -1141,9 +1206,63 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @private
          */
         async #buildSkills () {
+            await this.#buildCharacteristics()
             await this.#buildCoreSkills()
             await this.#buildMagicSkills()
             await this.#buildCombatStyles()
+        }
+
+        /**
+         * Characteristic keys and labels used by the UESRPG system.
+         * @private
+         */
+        static #CHARACTERISTIC_KEYS = ['str', 'end', 'agi', 'int', 'wp', 'prc', 'prs', 'lck']
+        static #CHARACTERISTIC_LABELS = {
+            str: 'Strength',
+            end: 'Endurance',
+            agi: 'Agility',
+            int: 'Intelligence',
+            wp: 'Willpower',
+            prc: 'Perception',
+            prs: 'Personality',
+            lck: 'Luck'
+        }
+
+        /**
+         * Build characteristic test buttons.
+         * Shows each characteristic with its total value in the Skills tab.
+         * Left-click triggers the system's onClickCharacteristic handler.
+         * @private
+         */
+        async #buildCharacteristics () {
+            if (!this.actor?.system?.characteristics) return
+
+            const groupId = 'characteristics'
+            const groupData = { id: groupId, type: 'system' }
+            const actions = []
+
+            const characteristics = this.actor.system.characteristics
+
+            for (const chaKey of ActionHandler.#CHARACTERISTIC_KEYS) {
+                const cha = characteristics[chaKey]
+                if (!cha) continue
+
+                const total = Number(cha.total ?? cha.value ?? 0)
+                const label = ActionHandler.#CHARACTERISTIC_LABELS[chaKey] ?? chaKey.toUpperCase()
+
+                actions.push({
+                    id: `cha-${chaKey}`,
+                    name: label,
+                    encodedValue: ['characteristic', chaKey].join(this.delimiter),
+                    info1: { text: `${total}` }
+                })
+            }
+
+            if (actions.length > 0) {
+                this.addActions(actions, groupData)
+            } else {
+                this.#logOmittedGroup(groupId, 'no characteristics')
+            }
         }
 
         /**
@@ -1203,7 +1322,6 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 // For PCs, use skill items (excluding magic category)
                 for (const [itemId, itemData] of this.#getItemsOfType('skill')) {
                     if (!itemData) continue
-                    if (itemData.system?.category === 'magic') continue
 
                     const tn = itemData.system?.value || 0
                     const name = itemData.name
@@ -1221,6 +1339,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
             if (actions.length > 0) {
                 this.addActions(actions, groupData)
+            } else {
+                this.#logOmittedGroup(groupId, 'no special actions')
             }
         }
 
@@ -1268,13 +1388,14 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const groupId = 'combatStyles'
             const groupData = { id: groupId, type: 'system' }
             const actions = []
+            const activeId = this.#getActiveCombatStyle()?.id ?? null
 
             for (const [itemId, itemData] of this.#getItemsOfType('combatStyle')) {
                 if (!itemData) continue
 
                 const value = itemData.system?.value || 0
                 const rankAbbr = this.#abbrRank(itemData.system?.rank)
-                const active = itemData.system?.active || false
+                const active = activeId ? String(itemId) === String(activeId) : (itemData.system?.active === true)
                 const name = itemData.name
 
                 actions.push({
@@ -1320,6 +1441,10 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 // ALWAYS show weapons, equipped or not
                 const equipped = itemData.system?.equipped || false
                 const damage = itemData.system?.damage || ''
+                const charge = itemData.system?.charge
+                const chargeText = (charge && (Number(charge?.max ?? 0) > 0 || Number(charge?.value ?? 0) > 0))
+                    ? `C ${Number(charge?.value ?? 0)}/${Number(charge?.max ?? 0)}`
+                    : ''
                 const name = itemData.name
 
                 actions.push({
@@ -1327,6 +1452,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                     name,
                     encodedValue: ['weapon', itemId].join(this.delimiter),
                     info1: { text: damage },
+                    ...(chargeText ? { info2: { text: chargeText } } : {}),
                     cssClass: equipped ? 'active' : '' // Highlight if equipped
                 })
             }
@@ -1350,7 +1476,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
                 // ALWAYS show armor, equipped or not
                 const equipped = itemData.system?.equipped || false
-                const ar = itemData.system?.ar || 0
+                const ar = itemData.system?.armor || 0
                 const name = itemData.name
 
                 actions.push({
@@ -1381,12 +1507,14 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
                 // ALWAYS show items, equipped or not
                 const equipped = itemData.system?.equipped || false
+                const quantity = Number(itemData.system?.quantity ?? 1)
                 const name = itemData.name
 
                 actions.push({
                     id: itemId,
                     name,
                     encodedValue: ['item', itemId].join(this.delimiter),
+                    ...(quantity > 1 ? { info1: { text: `x${quantity}` } } : {}),
                     cssClass: equipped ? 'active' : '' // Highlight if equipped
                 })
             }
@@ -1410,6 +1538,10 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
                 const quantity = itemData.system?.quantity || 0
                 const equipped = itemData.system?.equipped || false
+                const charge = itemData.system?.charge
+                const chargeText = (charge && (Number(charge?.max ?? 0) > 0 || Number(charge?.value ?? 0) > 0))
+                    ? `C ${Number(charge?.value ?? 0)}/${Number(charge?.max ?? 0)}`
+                    : ''
                 const name = itemData.name
 
                 actions.push({
@@ -1417,6 +1549,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                     name,
                     encodedValue: ['ammunition', itemId].join(this.delimiter),
                     info1: { text: `x${quantity}` },
+                    ...(chargeText ? { info2: { text: chargeText } } : {}),
                     cssClass: equipped ? 'active' : ''
                 })
             }
@@ -1438,9 +1571,11 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
             // Group spells by school
             const spellsBySchool = new Map()
+            let totalSpells = 0
 
             for (const [itemId, itemData] of this.#getItemsOfType('spell')) {
                 if (!itemData) continue
+                totalSpells += 1
 
                 const school = itemData.system?.school || 'other'
                 if (!spellsBySchool.has(school)) {
@@ -1481,6 +1616,10 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 if (actions.length > 0) {
                     this.addActions(actions, groupData)
                 }
+            }
+
+            if (totalSpells === 0) {
+                this.#logOmittedGroup('spells', 'no spells')
             }
         }
 
@@ -1526,6 +1665,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
             if (activated.length > 0) this.addActions(activated.map(e => e.action), groupDataActivated)
             if (passive.length > 0) this.addActions(passive.map(e => e.action), groupDataPassive)
+            if (all.length === 0) this.#logOmittedGroup('talents', 'no talents')
         }
 
         /**
@@ -1560,6 +1700,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
             if (activated.length > 0) this.addActions(activated.map(e => e.action), groupDataActivated)
             if (passive.length > 0) this.addActions(passive.map(e => e.action), groupDataPassive)
+            if (all.length === 0) this.#logOmittedGroup('traits', 'no traits')
         }
 
         /**
@@ -1594,35 +1735,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
             if (activated.length > 0) this.addActions(activated.map(e => e.action), groupDataActivated)
             if (passive.length > 0) this.addActions(passive.map(e => e.action), groupDataPassive)
+            if (all.length === 0) this.#logOmittedGroup('powers', 'no powers')
         }
 
-        /**
-         * Build Actions tracker display
-         * Shows current/max action points as a non-clickable action button
-         * @private
-         */
-        async #buildActionsTracker () {
-            if (!this.actor) return
-
-            const groupId = 'actionsTracker'
-            const groupData = { id: groupId, type: 'system' }
-            const actions = []
-
-            // Get action points from system.action_points
-            const currentAP = Number(this.actor.system?.action_points?.value ?? 0)
-            const maxAP = Number(this.actor.system?.action_points?.max ?? 0)
-
-            // Create a single action that displays "Actions X/Y"
-            actions.push({
-                id: 'action-points-tracker',
-                name: `Actions ${currentAP}/${maxAP}`,
-                encodedValue: ['actionsTracker', 'action-points-tracker'].join(this.delimiter),
-                cssClass: 'disabled' // Non-clickable
-            })
-
-            if (actions.length > 0) {
-                this.addActions(actions, groupData)
-            }
-        }
     }
 })

@@ -4,9 +4,28 @@ export let Utils = null
 
 /**
  * System actor types supported by this Token Action HUD system module.
- * IMPORTANT: These are the system's canonical Actor type ids, not localized display strings.
+ * IMPORTANT: These are canonical Actor type ids, not localized display strings.
  */
-export const SUPPORTED_ACTOR_TYPES = new Set(['Player Character', 'NPC', 'Group'])
+const KNOWN_ACTOR_TYPES = new Set(['Player Character', 'NPC', 'Group'])
+export let SUPPORTED_ACTOR_TYPES = new Set(KNOWN_ACTOR_TYPES)
+
+/**
+ * Resolve supported actor types dynamically from the system model when available.
+ * Intersects with known UESRPG types for safety and falls back conservatively.
+ * @returns {Set<string>}
+ */
+export function resolveSupportedActorTypes () {
+    const model = game?.system?.model?.Actor
+    if (model && typeof model === 'object') {
+        const keys = Object.keys(model)
+        const intersection = keys.filter(k => KNOWN_ACTOR_TYPES.has(k))
+        SUPPORTED_ACTOR_TYPES = new Set(intersection.length ? intersection : keys)
+        return SUPPORTED_ACTOR_TYPES
+    }
+
+    SUPPORTED_ACTOR_TYPES = new Set(KNOWN_ACTOR_TYPES)
+    return SUPPORTED_ACTOR_TYPES
+}
 
 /**
  * Check whether an actor type is supported.
@@ -14,7 +33,8 @@ export const SUPPORTED_ACTOR_TYPES = new Set(['Player Character', 'NPC', 'Group'
  * @returns {boolean}
  */
 export function isSupportedActorType (actorType) {
-    return SUPPORTED_ACTOR_TYPES.has(String(actorType ?? ''))
+    const types = resolveSupportedActorTypes()
+    return types.has(String(actorType ?? ''))
 }
 
 /**
@@ -40,7 +60,7 @@ export function getSystemModulePath (relativePath) {
 }
 
 /**
- * Phase 4: Lightweight debug logging.
+ * Unified debug logging: guards both debug and diagnostics logs behind a single toggle.
  * Guarded behind a module setting to avoid log spam in production worlds.
  */
 export function isDebugEnabled () {
@@ -56,6 +76,15 @@ export function debugLog (...args) {
     // Use console directly to avoid relying on Token Action HUD Core logger availability.
     // Keep messages short and structured.
     console.debug(`[${MODULE.ID}]`, ...args)
+}
+
+/**
+ * Diagnostics logging: now unified with debugLog.
+ * Prefixed with [diag] for easier filtering if needed.
+ */
+export function diagLog (...args) {
+    if (!isDebugEnabled()) return
+    console.debug(`[${MODULE.ID}][diag]`, ...args)
 }
 
 Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
@@ -148,8 +177,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @returns {object}     Object with current and max AP
          */
         static getActionPoints (actor) {
-            const current = Utils.parseNumber(actor?.system?.combat?.actionPoints?.current, 0)
-            const max = Utils.parseNumber(actor?.system?.combat?.actionPoints?.max, 0)
+            const current = Utils.parseNumber(actor?.system?.action_points?.value, 0)
+            const max = Utils.parseNumber(actor?.system?.action_points?.max, 0)
             return { current, max }
         }
 
@@ -159,8 +188,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @returns {object}     Object with current and limit
          */
         static getAttacksThisRound (actor) {
-            const current = Utils.parseNumber(actor?.system?.combat?.attacksThisRound?.current, 0)
-            const limit = Utils.parseNumber(actor?.system?.combat?.attacksThisRound?.limit, 2)
+            const current = Utils.parseNumber(actor?.system?.combat_tracking?.attacks_this_round, 0)
+            const limit = 2
             return { current, limit }
         }
     }

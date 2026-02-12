@@ -100,4 +100,16 @@ export function registerBuildCacheInvalidationHooks () {
         debugLog('Cache invalidated: updateCombat')
         invalidateAllBuildCaches()
     })
+
+    // System-specific hooks (guarded; only fire when the system emits them).
+    Hooks.on('uesrpg.timeChanged', () => {
+        debugLog('Cache invalidated: uesrpg.timeChanged')
+        invalidateAllBuildCaches()
+    })
+    Hooks.on('uesrpg.combatTimeChanged', () => {
+        debugLog('Cache invalidated: uesrpg.combatTimeChanged')
+        invalidateAllBuildCaches()
+    })
+    Hooks.on('uesrpgDamageApplied', (actor) => invalidateBuildCacheByActorId(actor?.id))
+    Hooks.on('uesrpgHealingApplied', (actor) => invalidateBuildCacheByActorId(actor?.id))
 }

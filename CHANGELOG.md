@@ -5,6 +5,65 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.14] - 2026-02-12
+
+### Added
+- **Characteristics group** in Skills tab — all 8 characteristics (STR, END, AGI, INT, WP, PRC, PRS, LCK) are now displayed with their total value and can be rolled directly from the HUD
+  - Left-click opens the system's characteristic test dialog (supports difficulty, manual modifiers, resistance bonuses, Iron Will for WP)
+  - Targeted rolls trigger the opposed characteristic workflow (same as from the actor sheet)
+  - Works for both Player Characters and NPCs
+
+### Changed
+- Compatibility verified with the system's "New-World-Only Release" (migration removal, world compatibility gate) — no breaking changes to module imports
+
+## [1.0.13] - 2026-02-07
+
+### Changed
+- **Feature activation (left-click)** now delegates to the system's canonical shared handlers:
+  - Talents use `activateTalentFromItemSheet` — supports defender talent automation, standard chat format, item macros
+  - Powers use `activatePowerFromItemSheet` — supports standard chat format, item macros
+  - Traits replicate the same pattern (activated → `executeItemActivation`, passive → system post format + macro)
+  - Chat posts now use the system's `_buildDefaultPostContent` format with item image, type label, and description
+- **Passive feature right-click chat** also uses the system content format for consistency
+
+### Removed
+- **"Actions" tab** removed from the HUD default layout (was a standalone tab containing only a non-clickable "Actions X/Y" badge — redundant with the interactive DOM-injected Action tracker already present in the tab bar)
+- Orphaned `#buildActionsTracker`, `#buildActionPointsBadgeAction`, and `#getActionPointsText` methods removed from ActionHandler
+- Orphaned `.uesrpg-ap-badge` CSS rule removed
+
+### Fixed
+- Passive talent activation from HUD now correctly triggers "defender" talent automation (via `runTalentActivationAutomation`)
+- Feature chat posts now include `user: game.user.id` matching the system's ChatMessage creation pattern
+
+## [1.0.12] - 2026-02-06
+
+### Added
+- **Short Rest and Long Rest buttons** in Utility tab (single-token only)
+  - Mirror Actor sheet rest workflow behavior
+  - Post rest summary to chat
+  - Update actor resources (HP/MP/SP regeneration as per system rules)
+  - Re-render actor sheet if open
+- **Shift+Right-click escape hatch**: always opens item sheet for features, regardless of settings
+
+### Changed
+- **Feature activation behavior** (Talents/Traits/Powers):
+  - **Left-click** now **always activates** features (spends costs/uses, posts activation card)
+  - **Right-click** on passive features uses configurable behavior (post description or open sheet)
+  - **Right-click** on activated features opens item sheet (no activation on right-click)
+- **Setting renamed**: `passiveFeatureLeftClick` → `passiveFeatureRightClick`
+  - Updated to reflect new behavior: left-click activates, right-click is configurable for passive features
+- **Unified debug toggle**: merged separate `debug` and `diagnostics` settings into one `debug` setting
+  - Single toggle now controls all HUD debug and diagnostics logging
+  - `diagLog` now uses same guard as `debugLog`
+
+### Fixed
+- Feature activation now properly calls system activation handlers for activated features
+- Passive features execute item macros best-effort (mirrors system sheet behavior)
+
+### Documentation
+- Created comprehensive test plan in `docs/testing/tokenhud-uesrpg3ev4.md`
+- Updated README with feature activation, rest actions, and Shift modifier documentation
+
 ## [1.0.6] - 2026-01-24
 
 ### Added

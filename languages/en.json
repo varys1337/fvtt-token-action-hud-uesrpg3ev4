@@ -32,6 +32,8 @@
       "trip": "Trip",
       "disarm": "Disarm",
       "coreSkills": "Core Skills",
+      "characteristics": "Characteristics",
+      "characteristic": "Characteristic",
       "magicSkills": "Magic Skills",
       "combatStyles": "Combat Styles",
       "weapons": "Weapons",
@@ -82,9 +84,9 @@
           "hint": "Display unequipped weapons and armor in the HUD",
           "name": "Display Unequipped Items"
         },
-        "passiveFeatureLeftClick": {
-          "name": "Passive feature left-click",
-          "hint": "Choose what left-click does for passive Talents/Traits/Powers.",
+        "passiveFeatureRightClick": {
+          "name": "Passive feature right-click",
+          "hint": "Choose what right-click does for passive Talents/Traits/Powers. Left-click always activates features.",
           "choices": {
             "chat": "Post description to chat",
             "sheet": "Open item sheet"
@@ -101,7 +103,7 @@
 	        },
 	        "debug": {
 	          "name": "Debug logging",
-	          "hint": "Enable additional console logging for this Token Action HUD system module."
+	          "hint": "Enable debug and diagnostics logging for this Token Action HUD system module."
 	        }
       }
     }

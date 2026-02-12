@@ -575,10 +575,3 @@
     padding: 0 0.2em;
     border-radius: 3px;
 }
-
-/* Compact AP badge button shown within existing groups (no extra tab) */
-#token-action-hud .tah-action-button.uesrpg-ap-badge {
-    font-size: var(--font-size-11);
-    opacity: 0.85;
-    padding: 0 6px;
-}

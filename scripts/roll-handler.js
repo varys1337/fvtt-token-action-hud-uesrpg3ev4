@@ -1,5 +1,5 @@
 import { MODULE } from './constants.js'
-import { isSupportedActorType, getSystemModulePath } from './utils.js'
+import { isSupportedActor, getSystemModulePath, diagLog } from './utils.js'
 
 export let RollHandler = null
 
@@ -33,13 +33,39 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const isRightClick = event?.button === 2 || event?.type === 'contextmenu'
 
             // We may not have this.actor in multi-token contexts; resolve controlled tokens once for safe fallbacks.
-            const controlledTokens = (canvas?.tokens?.controlled ?? [])
-                .filter((token) => isSupportedActorType(token?.actor?.type))
+            const selectedTokens = (canvas?.tokens?.controlled ?? [])
+            const controlledTokens = selectedTokens.filter((token) => isSupportedActor(token?.actor))
+
+            if (this.actor && !isSupportedActor(this.actor)) return
+
+            if (!this.actor && selectedTokens.length > 0 && controlledTokens.length === 0) {
+                ui.notifications?.warn?.('No supported UESRPG tokens selected.')
+                return
+            }
+
+            if (selectedTokens.length > controlledTokens.length) {
+                diagLog('Ignoring unsupported tokens', {
+                    selected: selectedTokens.length,
+                    supported: controlledTokens.length
+                })
+            }
+
+            if (!this.actor && controlledTokens.length === 0) {
+                return
+            }
+
+            if (controlledTokens.length > 1) {
+                const typeSet = new Set(controlledTokens.map(t => t?.actor?.type).filter(Boolean))
+                if (typeSet.size > 1) {
+                    ui.notifications?.warn?.('Mixed actor types selected. Please select only one type.')
+                    return
+                }
+            }
 
             // Right-click on embedded items/features/spells should open the relevant Item sheet, matching prior behavior.
             // Guard against multi-token selection (no single actor context) to avoid null-actor errors.
             if (isRightClick) {
-                const itemSheetTypes = ['weapon', 'armor', 'item', 'ammunition', 'spell', 'talent', 'trait', 'power']
+                const itemSheetTypes = ['weapon', 'armor', 'item', 'ammunition', 'spell', 'talent', 'trait', 'power', 'skill', 'magicSkill', 'combatStyle']
                 if (itemSheetTypes.includes(actionTypeId)) {
                     const actor = this.actor ?? (controlledTokens.length === 1 ? controlledTokens[0]?.actor : null)
                     const item = actor?.items?.get ? actor.items.get(actionId) : null
@@ -137,6 +163,151 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
         async handleGroupClick (event, group) {}
 
         /**
+         * Build a synthetic action event with a dataset payload.
+         * @private
+         * @param {object} dataset
+         * @param {object} [opts]
+         * @returns {Event}
+         */
+        #makeActionEvent (dataset = {}, opts = {}) {
+            const fakeEvent = new MouseEvent('click', {
+                bubbles: true,
+                cancelable: true,
+                view: window,
+                shiftKey: opts?.shiftKey || false
+            })
+
+            Object.defineProperty(fakeEvent, 'currentTarget', {
+                writable: false,
+                value: { dataset }
+            })
+
+            return fakeEvent
+        }
+
+        /**
+         * Build a synthetic item click event for roll handlers that call .closest('.item').
+         * @private
+         * @param {string} itemId
+         * @param {object} [opts]
+         * @returns {Event}
+         */
+        #makeItemEvent (itemId, opts = {}) {
+            const fakeEvent = new MouseEvent('click', {
+                bubbles: true,
+                cancelable: true,
+                view: window,
+                shiftKey: opts?.shiftKey || false
+            })
+
+            Object.defineProperty(fakeEvent, 'currentTarget', {
+                writable: false,
+                value: {
+                    closest: () => ({ dataset: { itemId } }),
+                    dataset: { itemId }
+                }
+            })
+
+            return fakeEvent
+        }
+
+        /**
+         * Invoke the system Combat Quick Action handler.
+         * @private
+         */
+        async #callCombatQuickAction (actor, token, dataset, eventOverrides = {}) {
+            const sheet = actor?.sheet ?? { actor, token, element: null }
+            const event = this.#makeActionEvent(dataset, eventOverrides)
+
+            if (sheet && typeof sheet._onCombatQuickAction === 'function') {
+                diagLog('Using system entrypoint', { action: dataset?.action, entry: '_onCombatQuickAction' })
+                return sheet._onCombatQuickAction(event)
+            }
+
+            try {
+                const { onCombatQuickAction } = await import(_systemImportPath('src/ui/sheets/shared/listeners/combat-actions.js'))
+                if (typeof onCombatQuickAction === 'function') {
+                    diagLog('Using system entrypoint', { action: dataset?.action, entry: 'onCombatQuickAction' })
+                    return onCombatQuickAction(sheet, event)
+                }
+            } catch (err) {
+                console.error(`${MODULE.ID} | Failed to load system combat quick action handler`, err)
+            }
+        }
+
+        /**
+         * Invoke the system Cast Magic handler.
+         * @private
+         */
+        async #callCastMagicAction (actor, token, preselectedSpell = null, eventOverrides = {}) {
+            const sheet = actor?.sheet ?? { actor, token, element: null }
+            const event = this.#makeActionEvent({ actionType: 'primary' }, eventOverrides)
+
+            if (sheet && typeof sheet._onCastMagicAction === 'function') {
+                diagLog('Using system entrypoint', { action: 'castMagic', entry: '_onCastMagicAction' })
+                return sheet._onCastMagicAction(event, preselectedSpell)
+            }
+
+            try {
+                const { onCastMagicAction } = await import(_systemImportPath('src/ui/sheets/shared/listeners/magic-cast.js'))
+                if (typeof onCastMagicAction === 'function') {
+                    diagLog('Using system entrypoint', { action: 'castMagic', entry: 'onCastMagicAction' })
+                    return onCastMagicAction(sheet, event, preselectedSpell)
+                }
+            } catch (err) {
+                console.error(`${MODULE.ID} | Failed to load system cast magic handler`, err)
+            }
+        }
+
+        /**
+         * Invoke the system skill roll handler.
+         * @private
+         */
+        async #callSkillRoll (actor, itemId, eventOverrides = {}) {
+            const sheet = actor?.sheet ?? { actor, token: this.token, element: null }
+            const event = this.#makeItemEvent(itemId, eventOverrides)
+
+            if (sheet && typeof sheet._onSkillRoll === 'function') {
+                diagLog('Using system entrypoint', { action: 'skill', entry: '_onSkillRoll' })
+                return sheet._onSkillRoll(event)
+            }
+
+            try {
+                const { onSkillRoll } = await import(_systemImportPath('src/ui/sheets/shared/listeners/rolls.js'))
+                if (typeof onSkillRoll === 'function') {
+                    diagLog('Using system entrypoint', { action: 'skill', entry: 'onSkillRoll' })
+                    return onSkillRoll(sheet, event)
+                }
+            } catch (err) {
+                console.error(`${MODULE.ID} | Failed to load system skill roll handler`, err)
+            }
+        }
+
+        /**
+         * Invoke the system combat style roll handler.
+         * @private
+         */
+        async #callCombatStyleRoll (actor, itemId, eventOverrides = {}) {
+            const sheet = actor?.sheet ?? { actor, token: this.token, element: null }
+            const event = this.#makeItemEvent(itemId, eventOverrides)
+
+            if (sheet && typeof sheet._onCombatRoll === 'function') {
+                diagLog('Using system entrypoint', { action: 'combatStyle', entry: '_onCombatRoll' })
+                return sheet._onCombatRoll(event)
+            }
+
+            try {
+                const { onCombatRoll } = await import(_systemImportPath('src/ui/sheets/shared/listeners/rolls.js'))
+                if (typeof onCombatRoll === 'function') {
+                    diagLog('Using system entrypoint', { action: 'combatStyle', entry: 'onCombatRoll' })
+                    return onCombatRoll(sheet, event)
+                }
+            } catch (err) {
+                console.error(`${MODULE.ID} | Failed to load system combat roll handler`, err)
+            }
+        }
+
+        /**
          * Handle action
          * @private
          * @param {object} event        The event
@@ -188,6 +359,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 break
             case 'combatStyle':
                 await this.#handleCombatStyleAction(event, actor, actionId)
+                break
+            case 'characteristic':
+                await this.#handleCharacteristicAction(event, actor, actionId)
                 break
             case 'weapon':
                 await this.#handleWeaponAction(event, actor, actionId)
@@ -292,7 +466,14 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             if (actionTypeId === 'multiCombat') {
                 const [cmd, arg] = String(actionId ?? '').split('~')
                 if (cmd === 'attack' && (arg === 'melee' || arg === 'ranged')) {
-                    await this.#handleAttackAction(event, actor, arg)
+                    const mode = arg
+                    const weapon = actor.items?.find?.(i =>
+                        i.type === 'weapon' &&
+                        i.system?.equipped === true &&
+                        String(i.system?.attackMode ?? '') === mode
+                    ) ?? null
+                    if (!weapon) return
+                    await this.#handleAttackAction(event, actor, weapon.id ?? weapon._id ?? arg)
                 }
                 return
             }
@@ -463,52 +644,39 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          */
         async #handleAttackAction (event, actor, actionId) {
             try {
-                // Find equipped weapon of the appropriate type
-                const attackMode = actionId === 'melee' ? 'melee' : 'ranged'
-                const weapon = actor.items.find(item =>
-                    item.type === 'weapon' &&
-                    item.system?.equipped &&
-                    item.system?.attackMode === attackMode
-                )
+                // Resolve weapon from actionId (preferred), fallback to equipped by mode for legacy action ids.
+                let weapon = actor?.items?.get?.(actionId) ?? null
+                let label = game.i18n.localize('tokenActionHud.uesrpg3ev4.attack')
 
                 if (!weapon) {
-                    ui.notifications.warn(`No ${attackMode} weapon equipped`)
+                    const attackMode = actionId === 'melee' ? 'melee' : 'ranged'
+                    weapon = actor.items.find(item =>
+                        item.type === 'weapon' &&
+                        item.system?.equipped &&
+                        item.system?.attackMode === attackMode
+                    )
+                    label = attackMode === 'melee'
+                        ? game.i18n.localize('tokenActionHud.uesrpg3ev4.attackMelee')
+                        : game.i18n.localize('tokenActionHud.uesrpg3ev4.attackRanged')
+                }
+
+                if (!weapon) {
+                    ui.notifications.warn('No equipped weapon found for this attack.')
                     return
                 }
 
-                // Resolve defenders (multi-target supported): prefer explicit user targets, then fallback to a single targeted token.
-                const defenderTokenUuids = Array.from(game.user?.targets ?? [])
-                    .map(t => t?.document?.uuid ?? t?.uuid)
-                    .filter(Boolean)
-
-                if (defenderTokenUuids.length === 0) {
-                    const targetToken = canvas.tokens.controlled.find(t => t.id !== this.token?.id) ||
-                        Array.from(canvas.tokens.placeables.values()).find(t => t.isTargeted)
-                    if (targetToken?.document?.uuid || targetToken?.uuid) {
-                        defenderTokenUuids.push(targetToken.document?.uuid ?? targetToken.uuid)
-                    }
-                }
-
-                if (defenderTokenUuids.length === 0) {
-                    ui.notifications.warn('Select at least one target to attack')
-                    return
-                }
-
-                // Dynamically import OpposedWorkflow from system
-                const { OpposedWorkflow } = await import(_systemImportPath('src/core/combat/opposed-workflow.js'))
-
-                // Create pending attack workflow
-                const attackerToken = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
-                if (!attackerToken) {
+                const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
+                if (!token) {
                     ui.notifications.warn('No attacker token found. Select your token and try again.')
                     return
                 }
 
-                await OpposedWorkflow.createPending({
-                    attackerTokenUuid: attackerToken.document?.uuid ?? attackerToken.uuid,
-                    defenderTokenUuids,
-                    weaponUuid: weapon.uuid,
-                    attackMode
+                // Prefer system combat quick action handler for parity with sheets.
+                const weaponId = weapon?.id ?? weapon?._id ?? actionId
+                await this.#callCombatQuickAction(actor, token, {
+                    action: 'attack',
+                    weaponId,
+                    label
                 })
             } catch (error) {
                 console.error('Error handling attack action:', error)
@@ -523,29 +691,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {object} actor The actor
          */
         async #handleAimAction (event, actor) {
-            // Call the system's Aim workflow directly from actor sheet
-            const fakeEvent = new MouseEvent('click', {
-                bubbles: true,
-                cancelable: true,
-                view: window
-            })
-
-            Object.defineProperty(fakeEvent, 'currentTarget', {
-                writable: false,
-                value: {
-                    dataset: {
-                        action: 'aim',
-                        label: 'Aim'
-                    }
-                }
-            })
-
-            const sheet = actor.sheet
-            if (sheet && typeof sheet._onCombatQuickAction === 'function') {
-                await sheet._onCombatQuickAction(fakeEvent)
-            } else {
-                ui.notifications.warn('Aim action not available')
-            }
+            const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
+            await this.#callCombatQuickAction(actor, token, { action: 'aim', label: 'Aim' })
         }
 
         /**
@@ -556,47 +703,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          */
         async #handleCastMagicAction (event, actor) {
             try {
-                // Get all spells from actor
-                const spells = actor.items.filter(item => item.type === 'spell')
-
-                if (spells.length === 0) {
-                    ui.notifications.warn('No spells available')
-                    return
-                }
-
-                // Create spell selection dialog
-                const spellList = spells.map(spell =>
-                    `<option value="${spell.id}">${spell.name} (MP ${spell.system?.cost || 0})</option>`
-                ).join('')
-
-                const content = `
-                    <form>
-                        <div class="form-group">
-                            <label>Select Spell:</label>
-                            <select id="spell-select" style="width: 100%;">
-                                ${spellList}
-                            </select>
-                        </div>
-                    </form>
-                `
-
-                new Dialog({
-                    title: 'Cast Magic',
-                    content,
-                    buttons: {
-                        cast: {
-                            label: 'Cast',
-                            callback: async (html) => {
-                                const spellId = html.find('#spell-select').val()
-                                await this.#handleSpellAction(event, actor, spellId)
-                            }
-                        },
-                        cancel: {
-                            label: 'Cancel'
-                        }
-                    },
-                    default: 'cast'
-                }).render(true)
+                const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
+                await this.#callCastMagicAction(actor, token, null, { shiftKey: event?.shiftKey })
             } catch (error) {
                 console.error('Error handling cast magic action:', error)
                 ui.notifications.error('Failed to open spell selection')
@@ -610,11 +718,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {object} actor The actor
          */
         async #handleDashAction (event, actor) {
-            // Post dash action to chat
-            ChatMessage.create({
-                speaker: ChatMessage.getSpeaker({ actor }),
-                content: `<strong>${actor.name}</strong> uses <strong>Dash</strong> to move quickly!`
-            })
+            const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
+            await this.#callCombatQuickAction(actor, token, { action: 'dash', label: 'Dash' })
         }
 
         /**
@@ -624,22 +729,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {object} actor The actor
          */
         async #handleDisengageAction (event, actor) {
-            try {
-                // Apply disengage effect
-                await actor.createEmbeddedDocuments('ActiveEffect', [{
-                    name: 'Disengaged',
-                    icon: 'icons/svg/cancel.svg',
-                    flags: { core: { statusId: 'disengaged' } },
-                    duration: { turns: 1 }
-                }])
-
-                ChatMessage.create({
-                    speaker: ChatMessage.getSpeaker({ actor }),
-                    content: `<strong>${actor.name}</strong> uses <strong>Disengage</strong> to retreat safely!`
-                })
-            } catch (error) {
-                console.error('Error handling disengage action:', error)
-            }
+            const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
+            await this.#callCombatQuickAction(actor, token, { action: 'disengage', label: 'Disengage' })
         }
 
         /**
@@ -649,24 +740,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {object} actor The actor
          */
         async #handleHideAction (event, actor) {
-            try {
-                // Find stealth/sneak skill
-                const stealthSkill = actor.items.find(item =>
-                    item.type === 'skill' &&
-                    (item.name.toLowerCase().includes('stealth') || item.name.toLowerCase().includes('sneak'))
-                )
-
-                if (stealthSkill) {
-                    await this.#handleSkillAction(event, actor, stealthSkill.id)
-                } else {
-                    ChatMessage.create({
-                        speaker: ChatMessage.getSpeaker({ actor }),
-                        content: `<strong>${actor.name}</strong> attempts to <strong>Hide</strong>!`
-                    })
-                }
-            } catch (error) {
-                console.error('Error handling hide action:', error)
-            }
+            const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
+            await this.#callCombatQuickAction(actor, token, { action: 'hide', label: 'Hide' })
         }
 
         /**
@@ -676,50 +751,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {object} actor The actor
          */
         async #handleUseItemAction (event, actor) {
-            // Get consumable items
-            const consumables = actor.items.filter(item =>
-                item.type === 'item' &&
-                item.system?.consumable
-            )
-
-            if (consumables.length === 0) {
-                ui.notifications.warn('No consumable items available')
-                return
-            }
-
-            // Create item selection dialog
-            const itemList = consumables.map(item =>
-                `<option value="${item.id}">${item.name}</option>`
-            ).join('')
-
-            const content = `
-                <form>
-                    <div class="form-group">
-                        <label>Select Item:</label>
-                        <select id="item-select" style="width: 100%;">
-                            ${itemList}
-                        </select>
-                    </div>
-                </form>
-            `
-
-            new Dialog({
-                title: 'Use Item',
-                content,
-                buttons: {
-                    use: {
-                        label: 'Use',
-                        callback: async (html) => {
-                            const itemId = html.find('#item-select').val()
-                            await this.#handleItemAction(event, actor, itemId)
-                        }
-                    },
-                    cancel: {
-                        label: 'Cancel'
-                    }
-                },
-                default: 'use'
-            }).render(true)
+            const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
+            await this.#callCombatQuickAction(actor, token, { action: 'use-item', label: 'Use Item' })
         }
 
         /**
@@ -729,29 +762,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {object} actor The actor
          */
         async #handleDefensiveStanceAction (event, actor) {
-            // Call the system's Defensive Stance workflow directly from actor sheet
-            const fakeEvent = new MouseEvent('click', {
-                bubbles: true,
-                cancelable: true,
-                view: window
-            })
-
-            Object.defineProperty(fakeEvent, 'currentTarget', {
-                writable: false,
-                value: {
-                    dataset: {
-                        action: 'defensive-stance',
-                        label: 'Defensive Stance'
-                    }
-                }
-            })
-
-            const sheet = actor.sheet
-            if (sheet && typeof sheet._onCombatQuickAction === 'function') {
-                await sheet._onCombatQuickAction(fakeEvent)
-            } else {
-                ui.notifications.warn('Defensive Stance action not available')
-            }
+            const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
+            await this.#callCombatQuickAction(actor, token, { action: 'defensive-stance', label: 'Defensive Stance' })
         }
 
         /**
@@ -762,20 +774,11 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          */
         async #handleOpportunityAttackAction (event, actor) {
             try {
-                // Find equipped melee weapon
-                const meleeWeapon = actor.items.find(item =>
-                    item.type === 'weapon' &&
-                    item.system?.equipped &&
-                    item.system?.attackMode === 'melee'
-                )
-
-                if (!meleeWeapon) {
-                    ui.notifications.warn('No melee weapon equipped for opportunity attack')
-                    return
-                }
-
-                // Execute opportunity attack
-                await this.#handleAttackAction(event, actor, 'melee')
+                const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
+                await this.#callCombatQuickAction(actor, token, {
+                    action: 'attack-of-opportunity',
+                    label: game.i18n.localize('tokenActionHud.uesrpg3ev4.opportunityAttack')
+                })
             } catch (error) {
                 console.error('Error handling opportunity attack action:', error)
             }
@@ -790,35 +793,20 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          */
         async #handleSpecialAction (event, actor, actionId) {
             try {
-                // Special case for 'arise' - just post chat message
-                if (actionId.toLowerCase() === 'arise') {
-                    // Use system's executeSpecialAction if available
-                    if (typeof actor.executeSpecialAction === 'function') {
-                        await actor.executeSpecialAction('arise')
-                    } else {
-                        // Fallback to chat message
-                        ChatMessage.create({
-                            speaker: ChatMessage.getSpeaker({ actor }),
-                            content: `<strong>${actor.name}</strong> performs <strong>Arise</strong>!`
-                        })
-                    }
-                    return
+                let actionType = 'primary'
+                try {
+                    const { getSpecialActionById } = await import(_systemImportPath('src/core/config/special-actions.js'))
+                    const def = typeof getSpecialActionById === 'function' ? getSpecialActionById(actionId) : null
+                    if (def?.actionType) actionType = String(def.actionType)
+                } catch (_e) {
+                    // ignore - fallback to primary
                 }
 
-                // For other special actions, use opposed workflow
-                // Get target token if one is selected
-                const targetToken = canvas.tokens.controlled.find(t => t.id !== this.token?.id) ||
-                                   Array.from(canvas.tokens.placeables.values()).find(t => t.isTargeted)
-
-                // Dynamically import SkillOpposedWorkflow from system
-                const { SkillOpposedWorkflow } = await import(_systemImportPath('src/core/skills/opposed-workflow.js'))
-
-                // Create pending skill opposed workflow for special action
-                await SkillOpposedWorkflow.createPending({
-                    attackerTokenUuid: this.token?.document?.uuid || actor.uuid,
-                    defenderTokenUuid: targetToken?.document?.uuid || null,
-                    attackerSkillUuid: null, // Let user choose from dropdown
-                    attackerSkillLabel: actionId.charAt(0).toUpperCase() + actionId.slice(1)
+                const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
+                await this.#callCombatQuickAction(actor, token, {
+                    action: 'specialAction',
+                    specialId: actionId,
+                    actionType
                 })
             } catch (error) {
                 console.error('Error handling special action:', error)
@@ -846,30 +834,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 return skill.sheet.render(true)
             }
 
-            // Left-click: Call the system's skill roll directly (works with or without target)
-            // The system's SimpleActorSheet._onSkillRoll handles both opposed and unopposed
-            const fakeEvent = new MouseEvent('click', {
-                bubbles: true,
-                cancelable: true,
-                view: window,
-                shiftKey: event?.shiftKey || false
-            })
-
-            Object.defineProperty(fakeEvent, 'currentTarget', {
-                writable: false,
-                value: {
-                    closest: () => ({ dataset: { itemId: actionId } })
-                }
-            })
-
-            // Call the actor sheet's skill roll method directly
-            const sheet = actor.sheet
-            if (sheet && typeof sheet._onSkillRoll === 'function') {
-                await sheet._onSkillRoll(fakeEvent)
-            } else {
-                // Fallback: open sheet
-                skill.sheet.render(true)
-            }
+            // Left-click: call system skill roll handler (opposed/unopposed routing).
+            await this.#callSkillRoll(actor, actionId, { shiftKey: event?.shiftKey })
         }
 
         /**
@@ -927,6 +893,80 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
         }
 
         /**
+         * Invoke the system characteristic roll handler.
+         * @private
+         */
+        async #callCharacteristicRoll (actor, chaKey, chaLabel, eventOverrides = {}) {
+            const sheet = actor?.sheet ?? { actor, token: this.token, element: null }
+
+            // Build a synthetic event that matches what onClickCharacteristic expects:
+            // - event.currentTarget.id = chaKey
+            // - event.currentTarget.getAttribute("name") = chaLabel
+            const fakeEvent = new MouseEvent('click', {
+                bubbles: true,
+                cancelable: true,
+                view: window,
+                shiftKey: eventOverrides?.shiftKey || false
+            })
+
+            const fakeTarget = document.createElement('span')
+            fakeTarget.id = chaKey
+            fakeTarget.setAttribute('name', chaLabel)
+
+            Object.defineProperty(fakeEvent, 'currentTarget', {
+                writable: false,
+                value: fakeTarget
+            })
+
+            // Try the sheet instance method first (underscore-prefixed).
+            if (sheet && typeof sheet._onClickCharacteristic === 'function') {
+                diagLog('Using system entrypoint', { action: 'characteristic', entry: '_onClickCharacteristic' })
+                return sheet._onClickCharacteristic(fakeEvent)
+            }
+
+            // Fall back to the exported handler.
+            try {
+                const { onClickCharacteristic } = await import(_systemImportPath('src/ui/sheets/shared/listeners/characteristics-handlers.js'))
+                if (typeof onClickCharacteristic === 'function') {
+                    diagLog('Using system entrypoint', { action: 'characteristic', entry: 'onClickCharacteristic' })
+                    return onClickCharacteristic(sheet, fakeEvent)
+                }
+            } catch (err) {
+                console.error(`${MODULE.ID} | Failed to load system characteristic roll handler`, err)
+            }
+        }
+
+        /**
+         * Handle characteristic action.
+         * Triggers the system's characteristic test workflow (opposed if targeted, standard if untargeted).
+         * @private
+         * @param {object} event    The event
+         * @param {object} actor    The actor
+         * @param {string} actionId The characteristic key (str, end, agi, int, wp, prc, prs, lck)
+         */
+        async #handleCharacteristicAction (event, actor, actionId) {
+            const chaKey = String(actionId ?? '').trim().toLowerCase()
+            const chaLabels = {
+                str: 'Strength',
+                end: 'Endurance',
+                agi: 'Agility',
+                int: 'Intelligence',
+                wp: 'Willpower',
+                prc: 'Perception',
+                prs: 'Personality',
+                lck: 'Luck'
+            }
+
+            const chaLabel = chaLabels[chaKey]
+            if (!chaLabel) {
+                ui.notifications?.warn(`Unknown characteristic: ${chaKey}`)
+                return
+            }
+
+            await this.#callCharacteristicRoll(actor, chaKey, chaLabel, { shiftKey: event?.shiftKey })
+        }
+
+        /**
          * Handle secondary action
          * @private
          * @param {object} event    The event
@@ -946,29 +986,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {object} actor The actor
          */
         async #handleReloadWeaponAction (event, actor) {
-            // Call the actor sheet's reload workflow directly
-            const fakeEvent = new MouseEvent('click', {
-                bubbles: true,
-                cancelable: true,
-                view: window
-            })
-
-            Object.defineProperty(fakeEvent, 'currentTarget', {
-                writable: false,
-                value: {
-                    dataset: {
-                        action: 'reload-weapon',
-                        label: 'Reload Weapon'
-                    }
-                }
-            })
-
-            const sheet = actor.sheet
-            if (sheet && typeof sheet._onCombatQuickAction === 'function') {
-                await sheet._onCombatQuickAction(fakeEvent)
-            } else {
-                ui.notifications.warn('Reload Weapon action not available')
-            }
+            const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
+            await this.#callCombatQuickAction(actor, token, { action: 'reload-weapon', label: 'Reload Weapon' })
         }
 
         /**
@@ -989,46 +1008,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 return combatStyle.sheet.render(true)
             }
 
-            // Left-click: perform skill roll (same as regular skills - handles both opposed and unopposed)
-            // The system's SimpleActorSheet._onSkillRoll handles combat styles the same way as regular skills
+            // Left-click: use the system combat roll handler to preserve combat style allowances.
             try {
-                const fakeEvent = new MouseEvent('click', {
-                    bubbles: true,
-                    cancelable: true,
-                    view: window,
-                    shiftKey: event?.shiftKey || false
-                })
-
-                Object.defineProperty(fakeEvent, 'currentTarget', {
-                    writable: false,
-                    value: {
-                        closest: () => ({ dataset: { itemId: actionId } })
-                    }
-                })
-
-                // Call the actor sheet's skill roll method directly
-                // This handles both opposed (with target) and unopposed (no target) tests
-                const sheet = actor.sheet
-                if (sheet && typeof sheet._onSkillRoll === 'function') {
-                    await sheet._onSkillRoll(fakeEvent)
-                } else {
-                    // Fallback: if target is selected, try SkillOpposedWorkflow
-                    const targetToken = canvas.tokens.controlled.find(t => t.id !== this.token?.id) ||
-                                       Array.from(canvas.tokens.placeables.values()).find(t => t.isTargeted)
-                    
-                    if (targetToken) {
-                        const { SkillOpposedWorkflow } = await import(_systemImportPath('src/core/skills/opposed-workflow.js'))
-                        await SkillOpposedWorkflow.createPending({
-                            attackerTokenUuid: this.token?.document?.uuid || actor.uuid,
-                            defenderTokenUuid: targetToken?.document?.uuid,
-                            attackerSkillUuid: combatStyle.uuid,
-                            attackerSkillLabel: combatStyle.name
-                        })
-                    } else {
-                        // Final fallback: open sheet
-                        combatStyle.sheet.render(true)
-                    }
-                }
+                await this.#callCombatStyleRoll(actor, actionId, { shiftKey: event?.shiftKey })
             } catch (error) {
                 console.error('Error handling combat style action:', error)
                 ui.notifications.error('Failed to roll combat style. See console for details.')
@@ -1148,215 +1130,13 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                     return
                 }
 
-                const [{ MagicOpposedWorkflow }, { shouldUseTargetedSpellWorkflow, shouldUseModernSpellWorkflow }, { getSpellRangeType, getSpellAoEConfig, placeAoETemplateAndCollectTargets }, { SKILL_DIFFICULTIES }] = await Promise.all([
-                    import(_systemImportPath('src/core/magic/opposed-workflow.js')),
-                    import(_systemImportPath('src/core/magic/spell-routing.js')),
-                    import(_systemImportPath('src/core/magic/spell-range.js')),
-                    import(_systemImportPath('src/core/skills/skill-tn.js'))
-                ])
-
-                // Mirror the actor sheet flow: after spell selection, present spell options dialog.
-                // If the user cancels, do not proceed.
-                const spellOptions = await this.#showSpellOptionsDialog({ actor, spell, SKILL_DIFFICULTIES })
-                if (spellOptions === null) return
-
-                const targetsFromUser = Array.from(game.user?.targets ?? [])
-                const rangeType = getSpellRangeType(spell)
-
-                // AoE targeting: place template, then collect affected tokens.
-                let aoeTemplateUuid = null
-                let aoeTemplateId = null
-                let targets = targetsFromUser
-                if (rangeType === 'aoe') {
-                    const placed = await placeAoETemplateAndCollectTargets({ casterToken, spell })
-                    if (!placed) return
-                    aoeTemplateUuid = placed.templateDoc?.uuid ?? null
-                    aoeTemplateId = placed.templateDoc?.id ?? null
-                    targets = Array.isArray(placed.targets) ? placed.targets : []
-                }
-
-                // Targeted (attack/healing/direct) spells route into the opposed workflow when at least one defender is present.
-                if (shouldUseTargetedSpellWorkflow(spell, targets)) {
-                    const defenderTokenUuids = Array.from(targets)
-                        .map(t => t?.document?.uuid ?? t?.uuid)
-                        .filter(Boolean)
-
-                    const aoeConfig = (rangeType === 'aoe')
-                        ? { ...(getSpellAoEConfig(spell) ?? {}), isAoE: true, templateUuid: aoeTemplateUuid, templateId: aoeTemplateId }
-                        : null
-
-                    await MagicOpposedWorkflow.createPending({
-                        attackerTokenUuid: casterToken.document?.uuid ?? casterToken.uuid,
-                        defenderTokenUuids,
-                        spellUuid: spell.uuid,
-                        spellOptions,
-                        castActionType: 'primary',
-                        aoe: aoeConfig,
-                        isAoE: rangeType === 'aoe'
-                    })
-                    return
-                }
-
-                // All spells use the modern casting engine when not routing into a targeted pending card.
-                // This matches the actor sheet behavior (shouldUseModernSpellWorkflow currently returns true for all spells).
-                if (shouldUseModernSpellWorkflow?.(spell) ?? true) {
-                    await MagicOpposedWorkflow.castUnopposed({
-                        attackerActorUuid: actor.uuid,
-                        attackerTokenUuid: casterToken.document?.uuid ?? casterToken.uuid,
-                        spellUuid: spell.uuid,
-                        spellOptions,
-                        castActionType: 'primary'
-                    })
-                    return
-                }
+                // Use the system Cast Magic handler with a preselected spell to preserve routing/range gating.
+                await this.#callCastMagicAction(actor, casterToken, spell, { shiftKey: event?.shiftKey })
             } catch (error) {
                 console.error('Error casting spell:', error)
                 // Fallback to opening spell sheet
                 spell.sheet.render(true)
             }
-        }
-
-        /**
-         * Spell options dialog (mirrors the ActorSheet "Cast Magic" follow-up dialog).
-         * Keeps TokenHUD casting semantics aligned with the system sheets.
-         *
-         * @private
-         * @param {object} params
-         * @param {Actor} params.actor
-         * @param {Item} params.spell
-         * @param {Array<{key:string,label:string,mod:number}>} params.SKILL_DIFFICULTIES
-         * @returns {Promise<object|null>} spellOptions or null if cancelled
-         */
-        async #showSpellOptionsDialog ({ actor, spell, SKILL_DIFFICULTIES }) {
-            const wpTotal = Number(actor?.system?.characteristics?.wp?.total ?? 0)
-            const wpBonus = Math.floor(wpTotal / 10)
-            const hasOverload = Boolean(spell?.system?.hasOverload)
-            const baseCost = Number(spell?.system?.cost ?? 0)
-
-            // Talent hooks (scaffolding only; does not apply mechanics beyond flags passed through)
-            const hasOverchargeTalent = actor?.items?.some?.(i => i?.type === 'talent' && String(i?.name ?? '').trim() === 'Overcharge') ?? false
-            const hasMagickaCyclingTalent = actor?.items?.some?.(i => i?.type === 'talent' && String(i?.name ?? '').trim() === 'Magicka Cycling') ?? false
-
-            const difficulties = Array.isArray(SKILL_DIFFICULTIES) ? SKILL_DIFFICULTIES : []
-            // Ensure 'average' default selected, if present.
-            const difficultyOptionsHtml = difficulties.map(df => {
-                const sign = Number(df?.mod ?? 0) >= 0 ? '+' : ''
-                const key = String(df?.key ?? 'average')
-                const sel = key === 'average' ? 'selected' : ''
-                const label = String(df?.label ?? key)
-                const mod = Number(df?.mod ?? 0)
-                return `<option value="${key}" ${sel}>${label} (${sign}${mod})</option>`
-            }).join('\n')
-
-            const overloadText = String(spell?.system?.overloadEffect ?? '').trim() || 'double cost for enhanced effect'
-
-            const content = `
-                <form class="uesrpg-spell-options">
-                    <h3>${spell.name}</h3>
-                    <div class="form-group">
-                        <label>MP Cost: <b>${baseCost}</b></label>
-                    </div>
-                    <div class="form-group" style="margin-bottom:8px; margin-top:8px;">
-                        <label style="display:block;"><b>Difficulty</b></label>
-                        <select name="difficultyKey" style="width:100%;">
-                            ${difficultyOptionsHtml}
-                        </select>
-                    </div>
-                    <div class="form-group" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
-                        <label style="margin:0;"><b>Manual Modifier</b></label>
-                        <input type="number" name="manualModifier" value="0" style="width:120px; text-align:center;" />
-                    </div>
-                    <hr style="margin: 10px 0;"/>
-                    <div class="form-group" id="restrainGroup" style="margin-top: 8px;">
-                        <label style="display: flex; align-items: center; gap: 8px;">
-                            <input type="checkbox" name="restrain" id="restrainCheckbox" ${!hasOverload ? 'checked' : ''} />
-                            <span><b>Spell Restraint</b> (reduce cost by ${wpBonus} to min 1)</span>
-                        </label>
-                    </div>
-                    ${hasOverload ? `
-                        <div class="form-group" id="overloadGroup" style="margin-top: 8px;">
-                            <label style="display: flex; align-items: center; gap: 8px;">
-                                <input type="checkbox" name="overload" id="overloadCheckbox" />
-                                <span><b>Overload</b> (${overloadText})</span>
-                            </label>
-                        </div>
-                    ` : ''}
-                    ${hasOverchargeTalent ? `
-                        <div class="form-group" style="margin-top: 8px;">
-                            <label style="display: flex; align-items: center; gap: 8px;">
-                                <input type="checkbox" name="overcharge" />
-                                <span><b>Overcharge</b> (talent option; not yet implemented)</span>
-                            </label>
-                        </div>
-                    ` : ''}
-                    ${hasMagickaCyclingTalent ? `
-                        <div class="form-group" style="margin-top: 8px;">
-                            <label style="display: flex; align-items: center; gap: 8px;">
-                                <input type="checkbox" name="magickaCycling" />
-                                <span><b>Magicka Cycling</b> (talent option; not yet implemented)</span>
-                            </label>
-                        </div>
-                    ` : ''}
-                </form>
-            `
-
-            return await new Promise((resolve) => {
-                const dialog = new Dialog({
-                    title: 'Spell Options',
-                    content,
-                    buttons: {
-                        cast: {
-                            label: 'Cast',
-                            callback: (html) => {
-                                const root = html instanceof HTMLElement ? html : html?.[0]
-                                const form = root?.querySelector?.('form')
-                                const difficultyKey = String(form?.difficultyKey?.value ?? 'average')
-                                const manualModifierRaw = form?.manualModifier?.value ?? '0'
-                                const manualModifier = Number.parseInt(String(manualModifierRaw ?? '0'), 10) || 0
-                                resolve({
-                                    isRestrained: form?.restrain?.checked ?? false,
-                                    isOverloaded: form?.overload?.checked ?? false,
-                                    useOvercharge: form?.overcharge?.checked ?? false,
-                                    useMagickaCycling: form?.magickaCycling?.checked ?? false,
-                                    difficultyKey,
-                                    manualModifier,
-                                    restraintValue: wpBonus,
-                                    baseCost
-                                })
-                            }
-                        },
-                        cancel: { label: 'Cancel', callback: () => resolve(null) }
-                    },
-                    default: 'cast',
-                    render: (html) => {
-                        if (!hasOverload) return
-                        const restrainCheckbox = html.find?.('#restrainCheckbox')?.[0]
-                        const overloadCheckbox = html.find?.('#overloadCheckbox')?.[0]
-                        const restrainGroup = html.find?.('#restrainGroup')?.[0]
-                        const overloadGroup = html.find?.('#overloadGroup')?.[0]
-
-                        if (restrainCheckbox && overloadCheckbox) {
-                            restrainCheckbox.addEventListener('change', (e) => {
-                                if (e?.target?.checked) {
-                                    overloadCheckbox.checked = false
-                                    if (overloadGroup) overloadGroup.style.opacity = '0.5'
-                                } else {
-                                    if (overloadGroup) overloadGroup.style.opacity = '1'
-                                }
-                            })
-                            overloadCheckbox.addEventListener('change', (e) => {
-                                if (e?.target?.checked) {
-                                    restrainCheckbox.checked = false
-                                    if (restrainGroup) restrainGroup.style.opacity = '0.5'
-                                } else {
-                                    if (restrainGroup) restrainGroup.style.opacity = '1'
-                                }
-                            })
-                        }
-                    }
-                }, { width: 420 })
-                dialog.render(true)
-            })
         }
 
         /**
@@ -1371,45 +1151,128 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             if (!feature) return
 
             const isRightClick = (event?.button === 2) || (event?.which === 3)
-            if (isRightClick) {
-                return feature.sheet.render(true)
-            }
-
+            const isShiftHeld = event?.shiftKey === true
             const activation = feature?.system?.activation ?? {}
 
-            // Activated feature: use the system activation executor (same as the sheet).
-            if (activation?.enabled === true) {
-                try {
-                    const { executeItemActivation } = await import(_systemImportPath('src/core/system/activation/activation-executor.js'))
+            // Right-click behavior (unchanged):
+            // - Shift+right-click always opens sheet (escape hatch)
+            // - For passive features: use configured passive right-click setting
+            // - For activated features: open sheet
+            if (isRightClick) {
+                if (isShiftHeld) {
+                    return feature.sheet.render(true)
+                }
+
+                if (activation?.enabled === true) {
+                    return feature.sheet.render(true)
+                }
+
+                const mode = game.settings.get(MODULE.ID, 'passiveFeatureRightClick') || 'chat'
+                if (mode === 'sheet') {
+                    return feature.sheet.render(true)
+                }
+
+                // mode === 'chat': post description using system content format
+                await this.#postFeatureDescriptionToChat(feature, actor, event)
+                return
+            }
+
+            // Left-click: delegate to the system's canonical sheet handlers so that
+            // HUD activation behaves identically to the item-sheet "Activate" button.
+            try {
+                const featureType = String(feature.type ?? '')
+
+                if (featureType === 'talent') {
+                    const { activateTalentFromItemSheet } = await import(
+                        _systemImportPath('src/ui/sheets/shared-handlers.js')
+                    )
+                    await activateTalentFromItemSheet({ item: feature, event })
+                    return
+                }
+
+                if (featureType === 'power') {
+                    const { activatePowerFromItemSheet } = await import(
+                        _systemImportPath('src/ui/sheets/shared-handlers.js')
+                    )
+                    await activatePowerFromItemSheet({ item: feature, event })
+                    return
+                }
+
+                // Traits: no dedicated system handler — replicate the shared-handler pattern.
+                if (activation?.enabled === true) {
+                    const { executeItemActivation } = await import(
+                        _systemImportPath('src/core/system/activation/activation-executor.js')
+                    )
                     await executeItemActivation({
                         item: feature,
                         actor,
                         event,
                         renderChat: true,
-                        includeImage: false,
+                        includeImage: true,
                         context: {}
                     })
-                } catch (err) {
-                    console.error('token-action-hud-uesrpg3ev4 | Feature activation failed', err)
-                    ui.notifications.error('Failed to activate feature. See console for details.')
+                } else {
+                    await this.#postFeatureDescriptionToChat(feature, actor, event)
                 }
-                return
+            } catch (err) {
+                console.error('token-action-hud-uesrpg3ev4 | Feature activation failed', err)
+                ui.notifications.error('Failed to activate feature. See console for details.')
             }
+        }
 
-            // Passive feature: configured left-click behavior.
-            const mode = game.settings.get(MODULE.ID, 'passiveFeatureLeftClick') || 'chat'
-            if (mode === 'sheet') {
-                return feature.sheet.render(true)
-            }
+        /**
+         * Post a feature's description to chat using the system's standard content format.
+         * Also runs talent-specific automation (defender) and best-effort item macros,
+         * mirroring the behavior of shared-handlers.js for passive feature activation.
+         * @private
+         * @param {object} feature The item document
+         * @param {object} actor   The owning actor
+         * @param {object} event   The originating event
+         */
+        async #postFeatureDescriptionToChat (feature, actor, event) {
+            // Build content matching the system's _buildDefaultPostContent format (with image).
+            const img = feature.img ?? ''
+            const name = feature.name ?? 'Feature'
+            const type = feature.type ?? ''
+            const description = feature.system?.description ?? ''
+            const content = img
+                ? `<h2><img src="${img}"</img>${name}</h2>\n    <i><b>${type}</b></i><p>\n      <i>${description}</i>`
+                : `<h2>${name}</h2><p>\n  <i><b>${type}</b></i><p>\n    <i>${description}</i>`
 
-            const description = feature.system?.description || ''
             await ChatMessage.create({
+                user: game.user.id,
                 speaker: ChatMessage.getSpeaker({ actor }),
-                content: `
-                    <h3>${feature.name}</h3>
-                    <div>${description || '<i>No description.</i>'}</div>
-                `
+                content
             })
+
+            // Talent-specific automation: check for "defender" slug
+            if (String(feature.type ?? '') === 'talent') {
+                try {
+                    const { resolveTalentSlug } = await import(
+                        _systemImportPath('src/core/traits/talents-api.js')
+                    )
+                    const { runTalentActivationAutomation } = await import(
+                        _systemImportPath('src/core/system/activation/activation-executor.js')
+                    )
+                    if (resolveTalentSlug(feature?.name ?? '') === 'defender') {
+                        await runTalentActivationAutomation({ item: feature, actor, context: {} })
+                    }
+                } catch (_e) {
+                    // Best-effort: talent automation is non-critical
+                }
+            }
+
+            // Run item macro best-effort
+            try {
+                const { executeItemMacroBestEffort } = await import(
+                    _systemImportPath('src/core/system/activation/activation-executor.js')
+                )
+                if (typeof executeItemMacroBestEffort === 'function') {
+                    await executeItemMacroBestEffort(feature, { event })
+                }
+            } catch (_e) {
+                // Best-effort: macro execution is non-critical
+            }
         }
 
         /**
@@ -1426,6 +1289,66 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                     await game.combat?.nextTurn()
                 }
                 break
+
+            // Short Rest
+            case 'shortRest': {
+                if (!actor) break
+                // Mirror system permission checks
+                if (!game.user?.isGM && !actor?.isOwner) {
+                    ui.notifications?.warn?.('You do not have permission to rest this actor.')
+                    break
+                }
+                try {
+                    const { applyShortRest, buildRestChatContent } = await import(_systemImportPath('src/ui/sheets/rest-workflow.js'))
+                    if (typeof applyShortRest === 'function') {
+                        const { line } = await applyShortRest(actor)
+                        if (line) {
+                            const content = buildRestChatContent('Short Rest', [line])
+                            await ChatMessage.create({
+                                user: game.user.id,
+                                speaker: ChatMessage.getSpeaker({ actor }),
+                                content
+                            })
+                        }
+                        // Re-render sheet if open
+                        if (actor.sheet?.rendered) actor.sheet.render(false)
+                    }
+                } catch (error) {
+                    console.error(`${MODULE.ID} | Failed applying Short Rest`, error)
+                    ui.notifications?.error?.('Failed to apply Short Rest. See console for details.')
+                }
+                break
+            }
+
+            // Long Rest
+            case 'longRest': {
+                if (!actor) break
+                // Mirror system permission checks
+                if (!game.user?.isGM && !actor?.isOwner) {
+                    ui.notifications?.warn?.('You do not have permission to rest this actor.')
+                    break
+                }
+                try {
+                    const { applyLongRest, buildRestChatContent } = await import(_systemImportPath('src/ui/sheets/rest-workflow.js'))
+                    if (typeof applyLongRest === 'function') {
+                        const { line } = await applyLongRest(actor)
+                        if (line) {
+                            const content = buildRestChatContent('Long Rest', [line])
+                            await ChatMessage.create({
+                                user: game.user.id,
+                                speaker: ChatMessage.getSpeaker({ actor }),
+                                content
+                            })
+                        }
+                        // Re-render sheet if open
+                        if (actor.sheet?.rendered) actor.sheet.render(false)
+                    }
+                } catch (error) {
+                    console.error(`${MODULE.ID} | Failed applying Long Rest`, error)
+                    ui.notifications?.error?.('Failed to apply Long Rest. See console for details.')
+                }
+                break
+            }
 
             // Resource quick-access (Utility tab)
             case 'resource-health': {

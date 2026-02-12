@@ -37,6 +37,7 @@ export const ACTION_TYPE = {
     skill: 'tokenActionHud.uesrpg3ev4.skill',
     magicSkill: 'tokenActionHud.uesrpg3ev4.magicSkill',
     combatStyle: 'tokenActionHud.uesrpg3ev4.combatStyle',
+    characteristic: 'tokenActionHud.uesrpg3ev4.characteristic',
 
     // Inventory
     weapon: 'tokenActionHud.uesrpg3ev4.weapon',
@@ -85,6 +86,7 @@ export const GROUP = {
     specialActions: { id: 'specialActions', name: 'tokenActionHud.uesrpg3ev4.specialActions', type: 'system' },
 
     // Skills
+    characteristics: { id: 'characteristics', name: 'tokenActionHud.uesrpg3ev4.characteristics', type: 'system' },
     coreSkills: { id: 'coreSkills', name: 'tokenActionHud.uesrpg3ev4.coreSkills', type: 'system' },
     magicSkills: { id: 'magicSkills', name: 'tokenActionHud.uesrpg3ev4.magicSkills', type: 'system' },
     combatStyles: { id: 'combatStyles', name: 'tokenActionHud.uesrpg3ev4.combatStyles', type: 'system' },
