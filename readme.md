@@ -5,6 +5,13 @@ Token Action HUD is a repositionable HUD of actions for a selected token, specif
 Introduction
 A plug-in module for the module Token Action HUD Core which adds support for UESRPG 3ev4. If you want to learn how to use Token HUD, please check Token HUD Core wiki for tutorials.
 
+### AppV2 Compatibility
+- Targeted for `uesrpg-3ev4 v1.0.0-RC.84+` and `token-action-hud-core 2.x`
+- Combat quick actions now dispatch using AppV2-compatible payload keys (`combatAction` with compatibility alias)
+- Hybrid combat execution path:
+  - Primary route: `encodedValue` + roll handler
+  - Fallback route: direct `onClick` combat dispatcher for reliability
+
 ### Feature Activation
 - **Left-click** on Talents/Traits/Powers **activates** them (spends costs/uses and posts activation card)
 - **Right-click** behavior for passive features is configurable in settings (post description or open sheet)
@@ -18,6 +25,15 @@ A plug-in module for the module Token Action HUD Core which adds support for UES
 ### Multi-Token Support
 - When multiple tokens are selected, you can execute attacks, spells, and activated talents across all selected tokens
 - Configurable mode: off, intersection (common actions only), or union (all actions)
+
+### Diagnostics
+- New setting: **Strict action diagnostics**
+- When enabled (default), critical action dispatch failures are fail-visible with user warnings instead of silent no-op behavior
+- Additional structured dispatch logs are emitted under the module debug namespace
+
+### Known Limitations
+- Magicka and Luck utility dialogs are still best-effort no-op if the system does not expose a stable dialog entrypoint
+- This module is optimized for the latest AppV2 UESRPG branch and does not prioritize older pre-AppV2 behavior
 
 ## Credit
 Forked from the Token HUD template https://github.com/Larkinabout/fvtt-token-action-hud-template

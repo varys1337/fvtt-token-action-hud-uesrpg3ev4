@@ -554,12 +554,21 @@ async function incrementAttackCount (attackerActor) {
     try {
         // Try to use the system's AttackTracker first (preferred method)
         try {
-            const path = getSystemModulePath('module/combat/attack-tracker.js')
-            if (!path) throw new Error('System path unavailable')
-            const { AttackTracker } = await import(path)
-            if (AttackTracker && typeof AttackTracker.incrementAttacks === 'function') {
-                await AttackTracker.incrementAttacks(attackerActor)
-                return
+            const candidatePaths = [
+                getSystemModulePath('src/core/combat/attack-tracker.js'),
+                getSystemModulePath('module/combat/attack-tracker.js')
+            ].filter(Boolean)
+
+            for (const path of candidatePaths) {
+                try {
+                    const { AttackTracker } = await import(path)
+                    if (AttackTracker && typeof AttackTracker.incrementAttacks === 'function') {
+                        await AttackTracker.incrementAttacks(attackerActor)
+                        return
+                    }
+                } catch (_e) {
+                    // Try the next candidate path.
+                }
             }
         } catch (importError) {
             // AttackTracker not available, fall back to manual increment
@@ -583,45 +592,70 @@ async function incrementAttackCount (attackerActor) {
  * 
  * Listens for button clicks on attack commit buttons in chat cards.
  */
-Hooks.on('renderChatMessage', async (message, html, data) => {
-    // Look for commit buttons in opposed workflow chat cards
-    // The system uses data-ues-opposed-action="commit" for attack commits
-    const selector = 'button[data-ues-opposed-action="commit"]'
-    html.off('click.tah-uesrpg3ev4', selector)
-    html.on('click.tah-uesrpg3ev4', selector, async (event) => {
-        try {
-            // Get the message flags to find the attacker
-            const workflowData = message?.flags?.['uesrpg-3ev4']?.opposedWorkflow || 
-                                message?.flags?.uesrpg3ev4?.opposedWorkflow
-            
-            if (!workflowData) return
-            
-            // Only process weapon attacks (has weaponUuid or attackMode in context)
-            const context = workflowData.context || {}
-            const isAttack = context.weaponUuid || context.attackMode
-            
-            if (!isAttack) return
-            
-            // Get attacker actor from context
-            const attackerUuid = context.attackerTokenUuid || 
-                               context.attackerActorUuid ||
-                               workflowData.attackerTokenUuid ||
-                               workflowData.attackerActorUuid
-            
-            if (!attackerUuid) return
-            
-            const attackerDoc = await fromUuid(attackerUuid)
-            const attackerToken = attackerDoc?.document ?? attackerDoc
-            const attackerActor = attackerToken?.actor ?? attackerDoc
-            
-            // Increment attack count as backup (system should already do this, but ensure HUD updates)
-            if (attackerActor) {
-                await incrementAttackCount(attackerActor)
-            }
-        } catch (error) {
-            console.error('Error incrementing attack count from button click:', error)
-        }
-    })
+function _resolveChatHtmlRoot (html) {
+    if (!html) return null
+    if (html instanceof HTMLElement) return html
+    if (html?.[0] instanceof HTMLElement) return html[0]
+    if (html?.element instanceof HTMLElement) return html.element
+    return null
+}
+
+async function _onOpposedCommitClicked (message) {
+    try {
+        // Get the message flags to find the attacker
+        const workflowData = message?.flags?.['uesrpg-3ev4']?.opposedWorkflow ||
+            message?.flags?.uesrpg3ev4?.opposedWorkflow
+
+        if (!workflowData) return
+
+        // Only process weapon attacks (has weaponUuid or attackMode in context)
+        const context = workflowData.context || {}
+        const isAttack = context.weaponUuid || context.attackMode
+
+        if (!isAttack) return
+
+        // Get attacker actor from context
+        const attackerUuid = context.attackerTokenUuid ||
+            context.attackerActorUuid ||
+            workflowData.attackerTokenUuid ||
+            workflowData.attackerActorUuid
+
+        if (!attackerUuid) return
+
+        const attackerDoc = await fromUuid(attackerUuid)
+        const attackerToken = attackerDoc?.document ?? attackerDoc
+        const attackerActor = attackerToken?.actor ?? attackerDoc
+
+        // Increment attack count as backup (system should already do this, but ensure HUD updates)
+        if (attackerActor) await incrementAttackCount(attackerActor)
+    } catch (error) {
+        console.error('Error incrementing attack count from button click:', error)
+    }
+}
+
+function _bindAttackCommitListeners (message, html) {
+    const root = _resolveChatHtmlRoot(html)
+    if (!root) return
+
+    // Look for commit buttons in opposed workflow chat cards.
+    // The system uses data-ues-opposed-action="commit" for attack commits.
+    for (const btn of root.querySelectorAll('button[data-ues-opposed-action="commit"]')) {
+        if (btn.dataset.tahUesrpg3ev4Bound === 'true') continue
+        btn.dataset.tahUesrpg3ev4Bound = 'true'
+        btn.addEventListener('click', () => {
+            void _onOpposedCommitClicked(message)
+        })
+    }
+}
+
+// Foundry v13/AppV2 hook: native HTMLElement.
+Hooks.on('renderChatMessageHTML', (message, html) => {
+    _bindAttackCommitListeners(message, html)
+})
+
+// Backwards compatibility for older render hook signatures (jQuery/legacy).
+Hooks.on('renderChatMessage', (message, html) => {
+    _bindAttackCommitListeners(message, html)
 })
 
 // ---------------------------------------------------------------------------
@@ -637,6 +671,7 @@ Hooks.once('ready', () => {
     //  - register small additive build extensions
     //  - invalidate the conservative build cache when they change relevant data
     mod.api = {
+        ...(mod.api ?? {}),
         registerBuildExtension,
         unregisterBuildExtension,
         invalidateCacheByActorId: invalidateBuildCacheByActorId,

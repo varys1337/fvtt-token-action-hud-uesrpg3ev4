@@ -68,4 +68,17 @@ export function register (coreUpdate) {
             coreUpdate(value)
         }
     })
+
+    // Fail-visible action diagnostics for critical execution paths.
+    game.settings.register(MODULE.ID, 'strictActionDiagnostics', {
+        name: game.i18n.localize('tokenActionHud.uesrpg3ev4.settings.strictActionDiagnostics.name'),
+        hint: game.i18n.localize('tokenActionHud.uesrpg3ev4.settings.strictActionDiagnostics.hint'),
+        scope: 'client',
+        config: true,
+        type: Boolean,
+        default: true,
+        onChange: (value) => {
+            coreUpdate(value)
+        }
+    })
 }

@@ -39,7 +39,12 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             if (this.actor && !isSupportedActor(this.actor)) return
 
             if (!this.actor && selectedTokens.length > 0 && controlledTokens.length === 0) {
-                ui.notifications?.warn?.('No supported UESRPG tokens selected.')
+                this.#notifyDispatchIssue('No supported UESRPG tokens selected.', {
+                    actionTypeId,
+                    actionId,
+                    selected: selectedTokens.length,
+                    supported: controlledTokens.length
+                })
                 return
             }
 
@@ -83,7 +88,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             // Core render-item behavior must have a single actor context.
             if (renderable.includes(actionTypeId) && this.isRenderItem()) {
                 const actor = this.actor ?? (controlledTokens.length === 1 ? controlledTokens[0]?.actor : null)
-                if (actor) return this.doRenderItem(actor, actionId)
+                if (actor && typeof this.renderItem === 'function') return this.renderItem(actor, actionId)
+                if (actor && typeof this.doRenderItem === 'function') return this.doRenderItem(actor, actionId)
             }
 
             // If single actor is selected
@@ -163,6 +169,42 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
         async handleGroupClick (event, group) {}
 
         /**
+         * Whether strict action diagnostics are enabled.
+         * @private
+         * @returns {boolean}
+         */
+        #isStrictDiagnosticsEnabled () {
+            try {
+                return !!game?.settings?.get?.(MODULE.ID, 'strictActionDiagnostics')
+            } catch {
+                return true
+            }
+        }
+
+        /**
+         * Emit a fail-visible diagnostic for action dispatch issues.
+         * @private
+         * @param {string} message
+         * @param {object} context
+         */
+        #notifyDispatchIssue (message, context = {}) {
+            diagLog('[dispatch]', message, context)
+            if (this.#isStrictDiagnosticsEnabled()) {
+                ui.notifications?.warn?.(message)
+            }
+        }
+
+        /**
+         * Build a synthetic target-like object with a dataset payload.
+         * @private
+         * @param {object} dataset
+         * @returns {object}
+         */
+        #makeSyntheticTarget (dataset = {}) {
+            return { dataset: { ...(dataset ?? {}) } }
+        }
+
+        /**
          * Build a synthetic action event with a dataset payload.
          * @private
          * @param {object} dataset
@@ -170,6 +212,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @returns {Event}
          */
         #makeActionEvent (dataset = {}, opts = {}) {
+            const target = this.#makeSyntheticTarget(dataset)
             const fakeEvent = new MouseEvent('click', {
                 bubbles: true,
                 cancelable: true,
@@ -179,10 +222,10 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
             Object.defineProperty(fakeEvent, 'currentTarget', {
                 writable: false,
-                value: { dataset }
+                value: target
             })
 
-            return fakeEvent
+            return { event: fakeEvent, target }
         }
 
         /**
@@ -193,6 +236,10 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @returns {Event}
          */
         #makeItemEvent (itemId, opts = {}) {
+            const target = {
+                ...this.#makeSyntheticTarget({ itemId }),
+                closest: () => ({ dataset: { itemId } })
+            }
             const fakeEvent = new MouseEvent('click', {
                 bubbles: true,
                 cancelable: true,
@@ -202,13 +249,10 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
             Object.defineProperty(fakeEvent, 'currentTarget', {
                 writable: false,
-                value: {
-                    closest: () => ({ dataset: { itemId } }),
-                    dataset: { itemId }
-                }
+                value: target
             })
 
-            return fakeEvent
+            return { event: fakeEvent, target }
         }
 
         /**
@@ -217,22 +261,44 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          */
         async #callCombatQuickAction (actor, token, dataset, eventOverrides = {}) {
             const sheet = actor?.sheet ?? { actor, token, element: null }
-            const event = this.#makeActionEvent(dataset, eventOverrides)
+            const normalizedDataset = {
+                ...(dataset ?? {}),
+                combatAction: dataset?.combatAction ?? dataset?.action ?? '',
+                action: dataset?.action ?? dataset?.combatAction ?? ''
+            }
+            const { event, target } = this.#makeActionEvent(normalizedDataset, eventOverrides)
+
+            if (!normalizedDataset?.combatAction) {
+                this.#notifyDispatchIssue('Invalid combat action payload: missing combatAction.', {
+                    actorId: actor?.id,
+                    dataset
+                })
+                return
+            }
 
             if (sheet && typeof sheet._onCombatQuickAction === 'function') {
-                diagLog('Using system entrypoint', { action: dataset?.action, entry: '_onCombatQuickAction' })
-                return sheet._onCombatQuickAction(event)
+                diagLog('Using system entrypoint', { action: normalizedDataset?.combatAction, entry: '_onCombatQuickAction' })
+                return sheet._onCombatQuickAction(event, target)
             }
 
             try {
                 const { onCombatQuickAction } = await import(_systemImportPath('src/ui/sheets/shared/listeners/combat-actions.js'))
                 if (typeof onCombatQuickAction === 'function') {
-                    diagLog('Using system entrypoint', { action: dataset?.action, entry: 'onCombatQuickAction' })
-                    return onCombatQuickAction(sheet, event)
+                    diagLog('Using system entrypoint', { action: normalizedDataset?.combatAction, entry: 'onCombatQuickAction' })
+                    return onCombatQuickAction.call(sheet, event, target)
                 }
             } catch (err) {
                 console.error(`${MODULE.ID} | Failed to load system combat quick action handler`, err)
+                this.#notifyDispatchIssue('Combat action handler failed to load.', {
+                    action: normalizedDataset?.combatAction,
+                    actorId: actor?.id
+                })
             }
+
+            this.#notifyDispatchIssue('No combat action handler available.', {
+                action: normalizedDataset?.combatAction,
+                actorId: actor?.id
+            })
         }
 
         /**
@@ -241,22 +307,29 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          */
         async #callCastMagicAction (actor, token, preselectedSpell = null, eventOverrides = {}) {
             const sheet = actor?.sheet ?? { actor, token, element: null }
-            const event = this.#makeActionEvent({ actionType: 'primary' }, eventOverrides)
+            const { event, target } = this.#makeActionEvent({ actionType: 'primary' }, eventOverrides)
 
             if (sheet && typeof sheet._onCastMagicAction === 'function') {
                 diagLog('Using system entrypoint', { action: 'castMagic', entry: '_onCastMagicAction' })
-                return sheet._onCastMagicAction(event, preselectedSpell)
+                return sheet._onCastMagicAction(event, target, preselectedSpell)
             }
 
             try {
                 const { onCastMagicAction } = await import(_systemImportPath('src/ui/sheets/shared/listeners/magic-cast.js'))
                 if (typeof onCastMagicAction === 'function') {
                     diagLog('Using system entrypoint', { action: 'castMagic', entry: 'onCastMagicAction' })
-                    return onCastMagicAction(sheet, event, preselectedSpell)
+                    return onCastMagicAction.call(sheet, event, target, preselectedSpell)
                 }
             } catch (err) {
                 console.error(`${MODULE.ID} | Failed to load system cast magic handler`, err)
+                this.#notifyDispatchIssue('Cast Magic handler failed to load.', {
+                    actorId: actor?.id
+                })
             }
+
+            this.#notifyDispatchIssue('No Cast Magic handler is available.', {
+                actorId: actor?.id
+            })
         }
 
         /**
@@ -265,22 +338,31 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          */
         async #callSkillRoll (actor, itemId, eventOverrides = {}) {
             const sheet = actor?.sheet ?? { actor, token: this.token, element: null }
-            const event = this.#makeItemEvent(itemId, eventOverrides)
+            const { event, target } = this.#makeItemEvent(itemId, eventOverrides)
 
             if (sheet && typeof sheet._onSkillRoll === 'function') {
                 diagLog('Using system entrypoint', { action: 'skill', entry: '_onSkillRoll' })
-                return sheet._onSkillRoll(event)
+                return sheet._onSkillRoll(event, target)
             }
 
             try {
                 const { onSkillRoll } = await import(_systemImportPath('src/ui/sheets/shared/listeners/rolls.js'))
                 if (typeof onSkillRoll === 'function') {
                     diagLog('Using system entrypoint', { action: 'skill', entry: 'onSkillRoll' })
-                    return onSkillRoll(sheet, event)
+                    return onSkillRoll.call(sheet, event, target)
                 }
             } catch (err) {
                 console.error(`${MODULE.ID} | Failed to load system skill roll handler`, err)
+                this.#notifyDispatchIssue('Skill roll handler failed to load.', {
+                    actorId: actor?.id,
+                    itemId
+                })
             }
+
+            this.#notifyDispatchIssue('No skill roll handler is available.', {
+                actorId: actor?.id,
+                itemId
+            })
         }
 
         /**
@@ -289,22 +371,31 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          */
         async #callCombatStyleRoll (actor, itemId, eventOverrides = {}) {
             const sheet = actor?.sheet ?? { actor, token: this.token, element: null }
-            const event = this.#makeItemEvent(itemId, eventOverrides)
+            const { event, target } = this.#makeItemEvent(itemId, eventOverrides)
 
             if (sheet && typeof sheet._onCombatRoll === 'function') {
                 diagLog('Using system entrypoint', { action: 'combatStyle', entry: '_onCombatRoll' })
-                return sheet._onCombatRoll(event)
+                return sheet._onCombatRoll(event, target)
             }
 
             try {
                 const { onCombatRoll } = await import(_systemImportPath('src/ui/sheets/shared/listeners/rolls.js'))
                 if (typeof onCombatRoll === 'function') {
                     diagLog('Using system entrypoint', { action: 'combatStyle', entry: 'onCombatRoll' })
-                    return onCombatRoll(sheet, event)
+                    return onCombatRoll.call(sheet, event, target)
                 }
             } catch (err) {
                 console.error(`${MODULE.ID} | Failed to load system combat roll handler`, err)
+                this.#notifyDispatchIssue('Combat roll handler failed to load.', {
+                    actorId: actor?.id,
+                    itemId
+                })
             }
+
+            this.#notifyDispatchIssue('No combat roll handler is available.', {
+                actorId: actor?.id,
+                itemId
+            })
         }
 
         /**
@@ -394,6 +485,14 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 break
             case 'utility':
                 await this.#handleUtilityAction(token, actionId)
+                break
+            default:
+                this.#notifyDispatchIssue('Unknown HUD action type received.', {
+                    actionTypeId,
+                    actionId,
+                    actorId: actor?.id,
+                    tokenId: token?.id ?? null
+                })
                 break
             }
         }
@@ -674,6 +773,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 // Prefer system combat quick action handler for parity with sheets.
                 const weaponId = weapon?.id ?? weapon?._id ?? actionId
                 await this.#callCombatQuickAction(actor, token, {
+                    combatAction: 'attack',
                     action: 'attack',
                     weaponId,
                     label
@@ -692,7 +792,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          */
         async #handleAimAction (event, actor) {
             const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
-            await this.#callCombatQuickAction(actor, token, { action: 'aim', label: 'Aim' })
+            await this.#callCombatQuickAction(actor, token, { combatAction: 'aim', action: 'aim', label: 'Aim' })
         }
 
         /**
@@ -719,7 +819,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          */
         async #handleDashAction (event, actor) {
             const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
-            await this.#callCombatQuickAction(actor, token, { action: 'dash', label: 'Dash' })
+            await this.#callCombatQuickAction(actor, token, { combatAction: 'dash', action: 'dash', label: 'Dash' })
         }
 
         /**
@@ -730,7 +830,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          */
         async #handleDisengageAction (event, actor) {
             const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
-            await this.#callCombatQuickAction(actor, token, { action: 'disengage', label: 'Disengage' })
+            await this.#callCombatQuickAction(actor, token, { combatAction: 'disengage', action: 'disengage', label: 'Disengage' })
         }
 
         /**
@@ -741,7 +841,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          */
         async #handleHideAction (event, actor) {
             const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
-            await this.#callCombatQuickAction(actor, token, { action: 'hide', label: 'Hide' })
+            await this.#callCombatQuickAction(actor, token, { combatAction: 'hide', action: 'hide', label: 'Hide' })
         }
 
         /**
@@ -752,7 +852,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          */
         async #handleUseItemAction (event, actor) {
             const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
-            await this.#callCombatQuickAction(actor, token, { action: 'use-item', label: 'Use Item' })
+            await this.#callCombatQuickAction(actor, token, { combatAction: 'use-item', action: 'use-item', label: 'Use Item' })
         }
 
         /**
@@ -763,7 +863,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          */
         async #handleDefensiveStanceAction (event, actor) {
             const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
-            await this.#callCombatQuickAction(actor, token, { action: 'defensive-stance', label: 'Defensive Stance' })
+            await this.#callCombatQuickAction(actor, token, { combatAction: 'defensive-stance', action: 'defensive-stance', label: 'Defensive Stance' })
         }
 
         /**
@@ -776,6 +876,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             try {
                 const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
                 await this.#callCombatQuickAction(actor, token, {
+                    combatAction: 'attack-of-opportunity',
                     action: 'attack-of-opportunity',
                     label: game.i18n.localize('tokenActionHud.uesrpg3ev4.opportunityAttack')
                 })
@@ -804,6 +905,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
                 const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
                 await this.#callCombatQuickAction(actor, token, {
+                    combatAction: 'specialAction',
                     action: 'specialAction',
                     specialId: actionId,
                     actionType
@@ -863,6 +965,11 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             }
 
             // Left-click: Call sheet's profession roll
+            const fakeTarget = this.#makeSyntheticTarget({
+                professionKey: profKey,
+                itemId: profKey
+            })
+
             const fakeEvent = new MouseEvent('click', {
                 bubbles: true,
                 cancelable: true,
@@ -871,13 +978,19 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
             Object.defineProperty(fakeEvent, 'currentTarget', {
                 writable: false,
-                value: { id: profKey }
+                value: fakeTarget
             })
 
             const sheet = actor.sheet
             if (sheet && typeof sheet._onProfessionsRoll === 'function') {
-                await sheet._onProfessionsRoll(fakeEvent)
+                await sheet._onProfessionsRoll(fakeEvent, fakeTarget)
+                return
             }
+
+            this.#notifyDispatchIssue('No profession roll handler is available.', {
+                actorId: actor?.id,
+                professionKey: profKey
+            })
         }
 
         /**
@@ -921,7 +1034,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             // Try the sheet instance method first (underscore-prefixed).
             if (sheet && typeof sheet._onClickCharacteristic === 'function') {
                 diagLog('Using system entrypoint', { action: 'characteristic', entry: '_onClickCharacteristic' })
-                return sheet._onClickCharacteristic(fakeEvent)
+                return sheet._onClickCharacteristic(fakeEvent, fakeTarget)
             }
 
             // Fall back to the exported handler.
@@ -929,7 +1042,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 const { onClickCharacteristic } = await import(_systemImportPath('src/ui/sheets/shared/listeners/characteristics-handlers.js'))
                 if (typeof onClickCharacteristic === 'function') {
                     diagLog('Using system entrypoint', { action: 'characteristic', entry: 'onClickCharacteristic' })
-                    return onClickCharacteristic(sheet, fakeEvent)
+                    return onClickCharacteristic.call(sheet, fakeEvent, fakeTarget)
                 }
             } catch (err) {
                 console.error(`${MODULE.ID} | Failed to load system characteristic roll handler`, err)
@@ -987,7 +1100,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          */
         async #handleReloadWeaponAction (event, actor) {
             const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
-            await this.#callCombatQuickAction(actor, token, { action: 'reload-weapon', label: 'Reload Weapon' })
+            await this.#callCombatQuickAction(actor, token, { combatAction: 'reload-weapon', action: 'reload-weapon', label: 'Reload Weapon' })
         }
 
         /**

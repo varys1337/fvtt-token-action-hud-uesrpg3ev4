@@ -101,10 +101,14 @@
             "union": "Union"
           }
 	        },
-	        "debug": {
-	          "name": "Debug logging",
-	          "hint": "Enable debug and diagnostics logging for this Token Action HUD system module."
-	        }
+        "debug": {
+          "name": "Debug logging",
+          "hint": "Enable debug and diagnostics logging for this Token Action HUD system module."
+        },
+        "strictActionDiagnostics": {
+          "name": "Strict action diagnostics",
+          "hint": "Show fail-visible warnings for critical action dispatch issues instead of silent no-op behavior."
+        }
       }
     }
   }

@@ -10,6 +10,7 @@ import {
     setBuildCacheEntry
 } from './cache.js'
 import { runBuildExtensions } from './extensions.js'
+import { executeCombatQuickActionForActor } from './dispatch.js'
 
 export let ActionHandler = null
 
@@ -498,6 +499,30 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          */
         #getActiveCombatStyle () {
             return this._itemIndex?.activeCombatStyle ?? null
+        }
+
+        /**
+         * Build a resilient onClick callback for combat quick actions.
+         * This is a hybrid bridge: encodedValue remains the primary route,
+         * while onClick provides a direct AppV2-safe fallback path.
+         * @private
+         * @param {object|Function} payloadOrFactory
+         * @returns {Function}
+         */
+        #makeCombatQuickOnClick (payloadOrFactory) {
+            if (this.isMultiTokenSelection) return undefined
+            return async (event) => {
+                const payload = typeof payloadOrFactory === 'function'
+                    ? (payloadOrFactory() ?? {})
+                    : (payloadOrFactory ?? {})
+
+                const actor = this.actor
+                const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor?.id) ?? actor?.getActiveTokens?.()?.[0] ?? null
+                await executeCombatQuickActionForActor(actor, payload, {
+                    token,
+                    shiftKey: !!event?.shiftKey
+                })
+            }
         }
 
         /**
@@ -1031,7 +1056,13 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 actions.push({
                     id: 'attack-melee',
                     name: this.#withAttackTracker(coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.attackMelee')),
-                    encodedValue: ['attack', meleeWeapon.id].join(this.delimiter)
+                    encodedValue: ['attack', meleeWeapon.id].join(this.delimiter),
+                    onClick: this.#makeCombatQuickOnClick({
+                        combatAction: 'attack',
+                        action: 'attack',
+                        weaponId: meleeWeapon.id,
+                        label: coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.attackMelee')
+                    })
                 })
             }
 
@@ -1041,7 +1072,13 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 actions.push({
                     id: 'attack-ranged',
                     name: this.#withAttackTracker(coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.attackRanged')),
-                    encodedValue: ['attack', rangedWeapon.id].join(this.delimiter)
+                    encodedValue: ['attack', rangedWeapon.id].join(this.delimiter),
+                    onClick: this.#makeCombatQuickOnClick({
+                        combatAction: 'attack',
+                        action: 'attack',
+                        weaponId: rangedWeapon.id,
+                        label: coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.attackRanged')
+                    })
                 })
             }
 
@@ -1049,7 +1086,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             actions.push({
                 id: 'aim',
                 name: coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.aim'),
-                encodedValue: ['aim', 'aim'].join(this.delimiter)
+                encodedValue: ['aim', 'aim'].join(this.delimiter),
+                onClick: this.#makeCombatQuickOnClick({ combatAction: 'aim', action: 'aim', label: 'Aim' })
             })
 
             // Cast Magic - opens spell selection dialog
@@ -1079,28 +1117,32 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             actions.push({
                 id: 'dash',
                 name: coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.dash'),
-                encodedValue: ['dash', 'dash'].join(this.delimiter)
+                encodedValue: ['dash', 'dash'].join(this.delimiter),
+                onClick: this.#makeCombatQuickOnClick({ combatAction: 'dash', action: 'dash', label: 'Dash' })
             })
 
             // Disengage - retreat without attacks of opportunity
             actions.push({
                 id: 'disengage',
                 name: coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.disengage'),
-                encodedValue: ['disengage', 'disengage'].join(this.delimiter)
+                encodedValue: ['disengage', 'disengage'].join(this.delimiter),
+                onClick: this.#makeCombatQuickOnClick({ combatAction: 'disengage', action: 'disengage', label: 'Disengage' })
             })
 
             // Hide - stealth action
             actions.push({
                 id: 'hide',
                 name: coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.hide'),
-                encodedValue: ['hide', 'hide'].join(this.delimiter)
+                encodedValue: ['hide', 'hide'].join(this.delimiter),
+                onClick: this.#makeCombatQuickOnClick({ combatAction: 'hide', action: 'hide', label: 'Hide' })
             })
 
             // Use Item - consumable item usage
             actions.push({
                 id: 'use-item',
                 name: coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.useItem'),
-                encodedValue: ['useItem', 'use'].join(this.delimiter)
+                encodedValue: ['useItem', 'use'].join(this.delimiter),
+                onClick: this.#makeCombatQuickOnClick({ combatAction: 'use-item', action: 'use-item', label: 'Use Item' })
             })
 
             // Reload Weapon (only if ranged weapon equipped)
@@ -1115,7 +1157,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                     id: 'reload-weapon',
                     name: needsReload ? `Reload (${reloadCost} AP)` : 'Reload Weapon',
                     encodedValue: ['secondaryAction', 'reload-weapon'].join(this.delimiter),
-                    cssClass: needsReload ? 'active' : ''
+                    cssClass: needsReload ? 'active' : '',
+                    onClick: this.#makeCombatQuickOnClick({ combatAction: 'reload-weapon', action: 'reload-weapon', label: 'Reload Weapon' })
                 })
             }
 
@@ -1139,14 +1182,20 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             actions.push({
                 id: 'defensive-stance',
                 name: coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.defensiveStance'),
-                encodedValue: ['defensiveStance', 'stance'].join(this.delimiter)
+                encodedValue: ['defensiveStance', 'stance'].join(this.delimiter),
+                onClick: this.#makeCombatQuickOnClick({ combatAction: 'defensive-stance', action: 'defensive-stance', label: 'Defensive Stance' })
             })
 
             // Opportunity Attack - reaction attack
             actions.push({
                 id: 'opportunity-attack',
                 name: this.#withAttackTracker(coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.opportunityAttack')),
-                encodedValue: ['opportunityAttack', 'opportunity'].join(this.delimiter)
+                encodedValue: ['opportunityAttack', 'opportunity'].join(this.delimiter),
+                onClick: this.#makeCombatQuickOnClick({
+                    combatAction: 'attack-of-opportunity',
+                    action: 'attack-of-opportunity',
+                    label: coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.opportunityAttack')
+                })
             })
 
             if (actions.length > 0) {
@@ -1178,7 +1227,13 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                         id,
                         name: sa?.name ?? id,
                         encodedValue: ['specialAction', id].join(this.delimiter),
-                        cssClass: sa?.known ? 'active' : ''
+                        cssClass: sa?.known ? 'active' : '',
+                        onClick: this.#makeCombatQuickOnClick({
+                            combatAction: 'specialAction',
+                            action: 'specialAction',
+                            specialId: id,
+                            actionType: String(sa?.actionType ?? 'primary')
+                        })
                     })
                 })
             } catch (err) {
@@ -1189,7 +1244,13 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                     actions.push({
                         id: action,
                         name: label,
-                        encodedValue: ['specialAction', action].join(this.delimiter)
+                        encodedValue: ['specialAction', action].join(this.delimiter),
+                        onClick: this.#makeCombatQuickOnClick({
+                            combatAction: 'specialAction',
+                            action: 'specialAction',
+                            specialId: action,
+                            actionType: 'primary'
+                        })
                     })
                 })
             }
