@@ -33,7 +33,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                     { ...groups.characteristics, nestId: 'skills_characteristics' },
                     { ...groups.coreSkills, nestId: 'skills_coreSkills' },
                     { ...groups.magicSkills, nestId: 'skills_magicSkills' },
-                    { ...groups.combatStyles, nestId: 'skills_combatStyles' }
+                    { ...groups.combatStyles, nestId: 'skills_combatStyles' },
+                    { ...groups.languages, nestId: 'skills_languages' },
+                    { ...groups.factions, nestId: 'skills_factions' }
                 ]
             },
             {
@@ -44,7 +46,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                     { ...groups.weapons, nestId: 'inventory_weapons' },
                     { ...groups.armor, nestId: 'inventory_armor' },
                     { ...groups.items, nestId: 'inventory_items' },
-                    { ...groups.ammunition, nestId: 'inventory_ammunition' }
+                    { ...groups.containers, nestId: 'inventory_containers' },
+                    { ...groups.ammunition, nestId: 'inventory_ammunition' },
+                    { ...groups.scrolls, nestId: 'inventory_scrolls' }
                 ]
             },
             {

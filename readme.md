@@ -11,6 +11,10 @@ A plug-in module for the module Token Action HUD Core which adds support for UES
 - Hybrid combat execution path:
   - Primary route: `encodedValue` + roll handler
   - Fallback route: direct `onClick` combat dispatcher for reliability
+- New adapter layer (`scripts/system-adapter.js`) centralizes system interop with ordered fallback:
+  - sheet method
+  - system runtime/public API surface
+  - system source-path fallback
 
 ### Feature Activation
 - **Left-click** on Talents/Traits/Powers **activates** them (spends costs/uses and posts activation card)
@@ -21,6 +25,18 @@ A plug-in module for the module Token Action HUD Core which adds support for UES
 - **Short Rest** and **Long Rest** buttons available in the Utility tab
 - Buttons mirror the behavior of Actor sheet rest buttons
 - Only visible for single-token selection
+
+### Expanded HUD Coverage
+- Added combat quick actions:
+  - **Delay Turn**
+  - **Put Out Fire** (`extinguish-burning`)
+- Added inventory/action groups:
+  - **Containers**
+  - **Scrolls**
+  - **Languages**
+  - **Factions**
+- Scroll entries cast via system scroll workflow (left-click); right-click opens item sheet.
+- Language/Faction entries open their item sheet; selector dialog fallback is supported.
 
 ### Multi-Token Support
 - When multiple tokens are selected, you can execute attacks, spells, and activated talents across all selected tokens

@@ -1,5 +1,6 @@
 import { MODULE } from './constants.js'
 import { isSupportedActor, getSystemModulePath, diagLog } from './utils.js'
+import { SystemAdapter } from './system-adapter.js'
 
 export let RollHandler = null
 
@@ -29,7 +30,12 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {string} encodedValue The encoded value
          */
         async handleActionClick (event, encodedValue) {
-            const [actionTypeId, actionId] = encodedValue.split('|')
+            let [actionTypeId, actionId] = encodedValue.split('|')
+            const aliases = {
+                delayAction: 'delay',
+                extinguish: 'extinguishBurning'
+            }
+            actionTypeId = aliases[actionTypeId] ?? actionTypeId
             const isRightClick = event?.button === 2 || event?.type === 'contextmenu'
 
             // We may not have this.actor in multi-token contexts; resolve controlled tokens once for safe fallbacks.
@@ -70,7 +76,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             // Right-click on embedded items/features/spells should open the relevant Item sheet, matching prior behavior.
             // Guard against multi-token selection (no single actor context) to avoid null-actor errors.
             if (isRightClick) {
-                const itemSheetTypes = ['weapon', 'armor', 'item', 'ammunition', 'spell', 'talent', 'trait', 'power', 'skill', 'magicSkill', 'combatStyle']
+                const itemSheetTypes = ['weapon', 'armor', 'item', 'container', 'ammunition', 'spell', 'scroll', 'talent', 'trait', 'power', 'skill', 'magicSkill', 'combatStyle', 'language', 'faction']
                 if (itemSheetTypes.includes(actionTypeId)) {
                     const actor = this.actor ?? (controlledTokens.length === 1 ? controlledTokens[0]?.actor : null)
                     const item = actor?.items?.get ? actor.items.get(actionId) : null
@@ -83,7 +89,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
             // NOTE: Do not include Talents/Traits/Powers here.
             // Those now support activation and have dedicated click behavior.
-            const renderable = ['skill', 'profession', 'magicSkill', 'combatStyle', 'weapon', 'armor', 'item', 'ammunition', 'spell']
+            const renderable = ['skill', 'profession', 'magicSkill', 'combatStyle', 'weapon', 'armor', 'item', 'container', 'ammunition', 'spell', 'scroll', 'language', 'faction']
 
             // Core render-item behavior must have a single actor context.
             if (renderable.includes(actionTypeId) && this.isRenderItem()) {
@@ -260,14 +266,11 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @private
          */
         async #callCombatQuickAction (actor, token, dataset, eventOverrides = {}) {
-            const sheet = actor?.sheet ?? { actor, token, element: null }
             const normalizedDataset = {
                 ...(dataset ?? {}),
                 combatAction: dataset?.combatAction ?? dataset?.action ?? '',
                 action: dataset?.action ?? dataset?.combatAction ?? ''
             }
-            const { event, target } = this.#makeActionEvent(normalizedDataset, eventOverrides)
-
             if (!normalizedDataset?.combatAction) {
                 this.#notifyDispatchIssue('Invalid combat action payload: missing combatAction.', {
                     actorId: actor?.id,
@@ -275,29 +278,21 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 })
                 return
             }
-
-            if (sheet && typeof sheet._onCombatQuickAction === 'function') {
-                diagLog('Using system entrypoint', { action: normalizedDataset?.combatAction, entry: '_onCombatQuickAction' })
-                return sheet._onCombatQuickAction(event, target)
+            const res = await SystemAdapter.executeCombatQuickAction({
+                actor,
+                token,
+                payload: normalizedDataset,
+                shiftKey: eventOverrides?.shiftKey || false
+            })
+            if (res?.ok) {
+                diagLog('Using adapter entrypoint', { action: normalizedDataset?.combatAction, path: res?.path })
+                return
             }
-
-            try {
-                const { onCombatQuickAction } = await import(_systemImportPath('src/ui/sheets/shared/listeners/combat-actions.js'))
-                if (typeof onCombatQuickAction === 'function') {
-                    diagLog('Using system entrypoint', { action: normalizedDataset?.combatAction, entry: 'onCombatQuickAction' })
-                    return onCombatQuickAction.call(sheet, event, target)
-                }
-            } catch (err) {
-                console.error(`${MODULE.ID} | Failed to load system combat quick action handler`, err)
-                this.#notifyDispatchIssue('Combat action handler failed to load.', {
-                    action: normalizedDataset?.combatAction,
-                    actorId: actor?.id
-                })
-            }
-
             this.#notifyDispatchIssue('No combat action handler available.', {
                 action: normalizedDataset?.combatAction,
-                actorId: actor?.id
+                actorId: actor?.id,
+                tokenId: token?.id ?? null,
+                adapterPath: res?.path ?? 'none'
             })
         }
 
@@ -306,29 +301,21 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @private
          */
         async #callCastMagicAction (actor, token, preselectedSpell = null, eventOverrides = {}) {
-            const sheet = actor?.sheet ?? { actor, token, element: null }
-            const { event, target } = this.#makeActionEvent({ actionType: 'primary' }, eventOverrides)
-
-            if (sheet && typeof sheet._onCastMagicAction === 'function') {
-                diagLog('Using system entrypoint', { action: 'castMagic', entry: '_onCastMagicAction' })
-                return sheet._onCastMagicAction(event, target, preselectedSpell)
+            const res = await SystemAdapter.executeCastMagic({
+                actor,
+                token,
+                preselectedSpell,
+                shiftKey: eventOverrides?.shiftKey || false,
+                castActionType: eventOverrides?.castActionType ?? 'primary'
+            })
+            if (res?.ok) {
+                diagLog('Using adapter entrypoint', { action: 'castMagic', path: res?.path })
+                return
             }
-
-            try {
-                const { onCastMagicAction } = await import(_systemImportPath('src/ui/sheets/shared/listeners/magic-cast.js'))
-                if (typeof onCastMagicAction === 'function') {
-                    diagLog('Using system entrypoint', { action: 'castMagic', entry: 'onCastMagicAction' })
-                    return onCastMagicAction.call(sheet, event, target, preselectedSpell)
-                }
-            } catch (err) {
-                console.error(`${MODULE.ID} | Failed to load system cast magic handler`, err)
-                this.#notifyDispatchIssue('Cast Magic handler failed to load.', {
-                    actorId: actor?.id
-                })
-            }
-
             this.#notifyDispatchIssue('No Cast Magic handler is available.', {
-                actorId: actor?.id
+                actorId: actor?.id,
+                tokenId: token?.id ?? null,
+                adapterPath: res?.path ?? 'none'
             })
         }
 
@@ -337,31 +324,19 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @private
          */
         async #callSkillRoll (actor, itemId, eventOverrides = {}) {
-            const sheet = actor?.sheet ?? { actor, token: this.token, element: null }
-            const { event, target } = this.#makeItemEvent(itemId, eventOverrides)
-
-            if (sheet && typeof sheet._onSkillRoll === 'function') {
-                diagLog('Using system entrypoint', { action: 'skill', entry: '_onSkillRoll' })
-                return sheet._onSkillRoll(event, target)
+            const res = await SystemAdapter.executeSkillRoll({
+                actor,
+                itemId,
+                shiftKey: eventOverrides?.shiftKey || false
+            })
+            if (res?.ok) {
+                diagLog('Using adapter entrypoint', { action: 'skill', path: res?.path })
+                return
             }
-
-            try {
-                const { onSkillRoll } = await import(_systemImportPath('src/ui/sheets/shared/listeners/rolls.js'))
-                if (typeof onSkillRoll === 'function') {
-                    diagLog('Using system entrypoint', { action: 'skill', entry: 'onSkillRoll' })
-                    return onSkillRoll.call(sheet, event, target)
-                }
-            } catch (err) {
-                console.error(`${MODULE.ID} | Failed to load system skill roll handler`, err)
-                this.#notifyDispatchIssue('Skill roll handler failed to load.', {
-                    actorId: actor?.id,
-                    itemId
-                })
-            }
-
             this.#notifyDispatchIssue('No skill roll handler is available.', {
                 actorId: actor?.id,
-                itemId
+                itemId,
+                adapterPath: res?.path ?? 'none'
             })
         }
 
@@ -370,31 +345,19 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @private
          */
         async #callCombatStyleRoll (actor, itemId, eventOverrides = {}) {
-            const sheet = actor?.sheet ?? { actor, token: this.token, element: null }
-            const { event, target } = this.#makeItemEvent(itemId, eventOverrides)
-
-            if (sheet && typeof sheet._onCombatRoll === 'function') {
-                diagLog('Using system entrypoint', { action: 'combatStyle', entry: '_onCombatRoll' })
-                return sheet._onCombatRoll(event, target)
+            const res = await SystemAdapter.executeCombatRoll({
+                actor,
+                itemId,
+                shiftKey: eventOverrides?.shiftKey || false
+            })
+            if (res?.ok) {
+                diagLog('Using adapter entrypoint', { action: 'combatStyle', path: res?.path })
+                return
             }
-
-            try {
-                const { onCombatRoll } = await import(_systemImportPath('src/ui/sheets/shared/listeners/rolls.js'))
-                if (typeof onCombatRoll === 'function') {
-                    diagLog('Using system entrypoint', { action: 'combatStyle', entry: 'onCombatRoll' })
-                    return onCombatRoll.call(sheet, event, target)
-                }
-            } catch (err) {
-                console.error(`${MODULE.ID} | Failed to load system combat roll handler`, err)
-                this.#notifyDispatchIssue('Combat roll handler failed to load.', {
-                    actorId: actor?.id,
-                    itemId
-                })
-            }
-
             this.#notifyDispatchIssue('No combat roll handler is available.', {
                 actorId: actor?.id,
-                itemId
+                itemId,
+                adapterPath: res?.path ?? 'none'
             })
         }
 
@@ -416,10 +379,13 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 await this.#handleAimAction(event, actor)
                 break
             case 'castMagic':
-                await this.#handleCastMagicAction(event, actor)
+                await this.#handleCastMagicAction(event, actor, actionId)
                 break
             case 'dash':
                 await this.#handleDashAction(event, actor)
+                break
+            case 'delay':
+                await this.#handleDelayAction(event, actor)
                 break
             case 'disengage':
                 await this.#handleDisengageAction(event, actor)
@@ -429,6 +395,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 break
             case 'useItem':
                 await this.#handleUseItemAction(event, actor)
+                break
+            case 'extinguishBurning':
+                await this.#handleExtinguishBurningAction(event, actor)
                 break
             case 'defensiveStance':
                 await this.#handleDefensiveStanceAction(event, actor)
@@ -463,11 +432,23 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             case 'item':
                 await this.#handleItemAction(event, actor, actionId)
                 break
+            case 'container':
+                await this.#handleContainerAction(event, actor, actionId)
+                break
             case 'ammunition':
                 await this.#handleAmmunitionAction(event, actor, actionId)
                 break
             case 'spell':
                 await this.#handleSpellAction(event, actor, actionId)
+                break
+            case 'scroll':
+                await this.#handleScrollAction(event, actor, actionId)
+                break
+            case 'language':
+                await this.#handleLanguageAction(event, actor, actionId)
+                break
+            case 'faction':
+                await this.#handleFactionAction(event, actor, actionId)
                 break
             case 'talent':
             case 'trait':
@@ -484,7 +465,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 await this.#handleActiveEffectAction(actor, actionId)
                 break
             case 'utility':
-                await this.#handleUtilityAction(token, actionId)
+                await this.#handleUtilityAction(token, actionId, actor)
                 break
             default:
                 this.#notifyDispatchIssue('Unknown HUD action type received.', {
@@ -801,10 +782,11 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {object} event The event
          * @param {object} actor The actor
          */
-        async #handleCastMagicAction (event, actor) {
+        async #handleCastMagicAction (event, actor, actionId = 'cast') {
             try {
                 const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
-                await this.#callCastMagicAction(actor, token, null, { shiftKey: event?.shiftKey })
+                const castActionType = String(actionId ?? '').toLowerCase() === 'instant' ? 'secondary' : 'primary'
+                await this.#callCastMagicAction(actor, token, null, { shiftKey: event?.shiftKey, castActionType })
             } catch (error) {
                 console.error('Error handling cast magic action:', error)
                 ui.notifications.error('Failed to open spell selection')
@@ -820,6 +802,17 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
         async #handleDashAction (event, actor) {
             const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
             await this.#callCombatQuickAction(actor, token, { combatAction: 'dash', action: 'dash', label: 'Dash' })
+        }
+
+        /**
+         * Handle delay action.
+         * @private
+         * @param {object} event The event
+         * @param {object} actor The actor
+         */
+        async #handleDelayAction (event, actor) {
+            const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
+            await this.#callCombatQuickAction(actor, token, { combatAction: 'delay', action: 'delay', label: 'Delay' })
         }
 
         /**
@@ -853,6 +846,21 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
         async #handleUseItemAction (event, actor) {
             const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
             await this.#callCombatQuickAction(actor, token, { combatAction: 'use-item', action: 'use-item', label: 'Use Item' })
+        }
+
+        /**
+         * Handle extinguish burning action.
+         * @private
+         * @param {object} event The event
+         * @param {object} actor The actor
+         */
+        async #handleExtinguishBurningAction (event, actor) {
+            const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
+            await this.#callCombatQuickAction(actor, token, {
+                combatAction: 'extinguish-burning',
+                action: 'extinguish-burning',
+                label: 'Put Out Fire'
+            })
         }
 
         /**
@@ -896,8 +904,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             try {
                 let actionType = 'primary'
                 try {
-                    const { getSpecialActionById } = await import(_systemImportPath('src/core/config/special-actions.js'))
-                    const def = typeof getSpecialActionById === 'function' ? getSpecialActionById(actionId) : null
+                    const def = await SystemAdapter.getSpecialActionDefinition(actionId)
                     if (def?.actionType) actionType = String(def.actionType)
                 } catch (_e) {
                     // ignore - fallback to primary
@@ -964,22 +971,43 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 return
             }
 
-            // Left-click: Call sheet's profession roll
-            const fakeTarget = this.#makeSyntheticTarget({
+            // Left-click: Call the system's profession roll handler.
+            // The modern NPC professions handler (NpcSheetV2._onProfessionsRoll) resolves the
+            // profession key via DOM traversal (closest("[data-profession-key]"), ".item", etc.)
+            // OR via heuristic parsing of the passed action object.
+            // Token Action HUD uses synthetic events, so we emulate both patterns.
+            const fakeTarget = {
+                ...this.#makeSyntheticTarget({
+                    professionKey: profKey,
+                    actionId: profKey,
+                    id: profKey,
+                    itemId: profKey
+                }),
+                // Heuristic resolver checks these properties directly.
                 professionKey: profKey,
-                itemId: profKey
-            })
+                id: profKey,
+                actionId: profKey,
+                // DOM resolver uses .closest(...) chains; emulate the key selectors it checks.
+                closest: (selector) => {
+                    const sel = String(selector ?? '')
+                    if (!sel) return null
+                    if (sel.includes('[data-profession-key]') || sel.includes('.profession-roll-target') || sel.includes('.item') || sel.includes('.npc-item')) {
+                        return { dataset: { professionKey: profKey, itemId: profKey } }
+                    }
+                    return null
+                }
+            }
 
             const fakeEvent = new MouseEvent('click', {
                 bubbles: true,
                 cancelable: true,
-                view: window
+                view: window,
+                shiftKey: event?.shiftKey || false
             })
 
-            Object.defineProperty(fakeEvent, 'currentTarget', {
-                writable: false,
-                value: fakeTarget
-            })
+            // Provide both currentTarget and target for maximum compatibility.
+            Object.defineProperty(fakeEvent, 'currentTarget', { writable: false, value: fakeTarget })
+            Object.defineProperty(fakeEvent, 'target', { writable: false, value: fakeTarget })
 
             const sheet = actor.sheet
             if (sheet && typeof sheet._onProfessionsRoll === 'function') {
@@ -1010,43 +1038,21 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @private
          */
         async #callCharacteristicRoll (actor, chaKey, chaLabel, eventOverrides = {}) {
-            const sheet = actor?.sheet ?? { actor, token: this.token, element: null }
-
-            // Build a synthetic event that matches what onClickCharacteristic expects:
-            // - event.currentTarget.id = chaKey
-            // - event.currentTarget.getAttribute("name") = chaLabel
-            const fakeEvent = new MouseEvent('click', {
-                bubbles: true,
-                cancelable: true,
-                view: window,
+            const res = await SystemAdapter.executeCharacteristicRoll({
+                actor,
+                key: chaKey,
+                label: chaLabel,
                 shiftKey: eventOverrides?.shiftKey || false
             })
-
-            const fakeTarget = document.createElement('span')
-            fakeTarget.id = chaKey
-            fakeTarget.setAttribute('name', chaLabel)
-
-            Object.defineProperty(fakeEvent, 'currentTarget', {
-                writable: false,
-                value: fakeTarget
+            if (res?.ok) {
+                diagLog('Using adapter entrypoint', { action: 'characteristic', path: res?.path })
+                return
+            }
+            this.#notifyDispatchIssue('No characteristic roll handler is available.', {
+                actorId: actor?.id,
+                characteristic: chaKey,
+                adapterPath: res?.path ?? 'none'
             })
-
-            // Try the sheet instance method first (underscore-prefixed).
-            if (sheet && typeof sheet._onClickCharacteristic === 'function') {
-                diagLog('Using system entrypoint', { action: 'characteristic', entry: '_onClickCharacteristic' })
-                return sheet._onClickCharacteristic(fakeEvent, fakeTarget)
-            }
-
-            // Fall back to the exported handler.
-            try {
-                const { onClickCharacteristic } = await import(_systemImportPath('src/ui/sheets/shared/listeners/characteristics-handlers.js'))
-                if (typeof onClickCharacteristic === 'function') {
-                    diagLog('Using system entrypoint', { action: 'characteristic', entry: 'onClickCharacteristic' })
-                    return onClickCharacteristic.call(sheet, fakeEvent, fakeTarget)
-                }
-            } catch (err) {
-                console.error(`${MODULE.ID} | Failed to load system characteristic roll handler`, err)
-            }
         }
 
         /**
@@ -1148,7 +1154,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
             // Left-click: toggle equipped status
             const equipped = weapon.system?.equipped || false
-            await weapon.update({ 'system.equipped': !equipped })
+            await SystemAdapter.setItemEquipped({ item: weapon, equipped: !equipped })
 
             ui.notifications.info(`${weapon.name} ${!equipped ? 'equipped' : 'unequipped'}`)
         }
@@ -1166,7 +1172,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
             // Toggle equipped status
             const equipped = armor.system?.equipped || false
-            await armor.update({ 'system.equipped': !equipped })
+            await SystemAdapter.setItemEquipped({ item: armor, equipped: !equipped })
 
             ui.notifications.info(`${armor.name} ${!equipped ? 'equipped' : 'unequipped'}`)
         }
@@ -1190,10 +1196,25 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             // Left-click: toggle equipped if item has equipped property, otherwise open sheet
             if (Object.prototype.hasOwnProperty.call(item.system || {}, 'equipped')) {
                 const equipped = item.system.equipped || false
-                await item.update({ 'system.equipped': !equipped })
+                await SystemAdapter.setItemEquipped({ item, equipped: !equipped })
                 ui.notifications.info(`${item.name} ${!equipped ? 'equipped' : 'unequipped'}`)
             } else {
                 // No equipped property, just open sheet
+                item.sheet.render(true)
+            }
+        }
+
+        /**
+         * Handle container action.
+         * @private
+         * @param {object} event
+         * @param {object} actor
+         * @param {string} actionId
+         */
+        async #handleContainerAction (event, actor, actionId) {
+            const item = actor.items.get(actionId)
+            if (!item) return
+            if (item.sheet && typeof item.sheet.render === 'function') {
                 item.sheet.render(true)
             }
         }
@@ -1217,7 +1238,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             // Left-click: toggle equipped if item has equipped property, otherwise open sheet
             if (Object.prototype.hasOwnProperty.call(ammo.system || {}, 'equipped')) {
                 const equipped = ammo.system.equipped || false
-                await ammo.update({ 'system.equipped': !equipped })
+                await SystemAdapter.setItemEquipped({ item: ammo, equipped: !equipped })
                 ui.notifications.info(`${ammo.name} ${!equipped ? 'equipped' : 'unequipped'}`)
             } else {
                 // No equipped property, just open sheet
@@ -1249,6 +1270,81 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 console.error('Error casting spell:', error)
                 // Fallback to opening spell sheet
                 spell.sheet.render(true)
+            }
+        }
+
+        /**
+         * Handle scroll action.
+         * @private
+         * @param {object} event
+         * @param {object} actor
+         * @param {string} actionId
+         */
+        async #handleScrollAction (event, actor, actionId) {
+            const scroll = actor.items.get(actionId)
+            if (!scroll) return
+
+            if (this.isRenderItem()) {
+                return scroll.sheet?.render?.(true)
+            }
+
+            const res = await SystemAdapter.executeScrollCast({
+                actor,
+                scrollItem: scroll,
+                castActionType: 'primary'
+            })
+
+            if (!res?.ok) {
+                this.#notifyDispatchIssue('Unable to cast scroll from HUD.', {
+                    actorId: actor?.id,
+                    itemId: actionId,
+                    adapterPath: res?.path ?? 'none'
+                })
+                scroll.sheet?.render?.(true)
+            }
+        }
+
+        /**
+         * Handle language action.
+         * @private
+         * @param {object} event
+         * @param {object} actor
+         * @param {string} actionId
+         */
+        async #handleLanguageAction (event, actor, actionId) {
+            const item = actor.items.get(actionId)
+            if (item?.sheet) {
+                item.sheet.render(true)
+                return
+            }
+            const res = await SystemAdapter.openSocialSelector({ actor, kind: 'language' })
+            if (!res?.ok) {
+                this.#notifyDispatchIssue('No language selector available.', {
+                    actorId: actor?.id,
+                    adapterPath: res?.path ?? 'none'
+                })
+            }
+        }
+
+        /**
+         * Handle faction action.
+         * @private
+         * @param {object} event
+         * @param {object} actor
+         * @param {string} actionId
+         */
+        async #handleFactionAction (event, actor, actionId) {
+            const item = actor.items.get(actionId)
+            if (item?.sheet) {
+                item.sheet.render(true)
+                return
+            }
+            const res = await SystemAdapter.openSocialSelector({ actor, kind: 'faction' })
+            if (!res?.ok) {
+                this.#notifyDispatchIssue('No faction selector available.', {
+                    actorId: actor?.id,
+                    adapterPath: res?.path ?? 'none'
+                })
             }
         }
 
@@ -1293,40 +1389,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             // Left-click: delegate to the system's canonical sheet handlers so that
             // HUD activation behaves identically to the item-sheet "Activate" button.
             try {
-                const featureType = String(feature.type ?? '')
-
-                if (featureType === 'talent') {
-                    const { activateTalentFromItemSheet } = await import(
-                        _systemImportPath('src/ui/sheets/shared-handlers.js')
-                    )
-                    await activateTalentFromItemSheet({ item: feature, event })
-                    return
-                }
-
-                if (featureType === 'power') {
-                    const { activatePowerFromItemSheet } = await import(
-                        _systemImportPath('src/ui/sheets/shared-handlers.js')
-                    )
-                    await activatePowerFromItemSheet({ item: feature, event })
-                    return
-                }
-
-                // Traits: no dedicated system handler — replicate the shared-handler pattern.
-                if (activation?.enabled === true) {
-                    const { executeItemActivation } = await import(
-                        _systemImportPath('src/core/system/activation/activation-executor.js')
-                    )
-                    await executeItemActivation({
-                        item: feature,
-                        actor,
-                        event,
-                        renderChat: true,
-                        includeImage: true,
-                        context: {}
-                    })
-                } else {
-                    await this.#postFeatureDescriptionToChat(feature, actor, event)
-                }
+                const res = await SystemAdapter.executeFeatureActivation({ item: feature, actor, event })
+                if (!res?.ok) await this.#postFeatureDescriptionToChat(feature, actor, event)
             } catch (err) {
                 console.error('token-action-hud-uesrpg3ev4 | Feature activation failed', err)
                 ui.notifications.error('Failed to activate feature. See console for details.')
@@ -1394,118 +1458,53 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {object} token    The token
          * @param {string} actionId The action id
          */
-        async #handleUtilityAction (token, actionId) {
-            const actor = token?.actor
+        /**
+         * Handle utility action
+         * @private
+         * @param {object} token    The token
+         * @param {string} actionId The action id
+         * @param {object|null} actorOverride Preferred actor context
+         */
+        async #handleUtilityAction (token, actionId, actorOverride = null) {
+            const actor = actorOverride ?? token?.actor ?? this.actor ?? null
             switch (actionId) {
             case 'endTurn':
-                if (game.combat?.current?.tokenId === token.id) {
+                if (token && game.combat?.current?.tokenId === token.id) {
                     await game.combat?.nextTurn()
                 }
                 break
 
-            // Short Rest
-            case 'shortRest': {
-                if (!actor) break
-                // Mirror system permission checks
-                if (!game.user?.isGM && !actor?.isOwner) {
-                    ui.notifications?.warn?.('You do not have permission to rest this actor.')
-                    break
-                }
-                try {
-                    const { applyShortRest, buildRestChatContent } = await import(_systemImportPath('src/ui/sheets/rest-workflow.js'))
-                    if (typeof applyShortRest === 'function') {
-                        const { line } = await applyShortRest(actor)
-                        if (line) {
-                            const content = buildRestChatContent('Short Rest', [line])
-                            await ChatMessage.create({
-                                user: game.user.id,
-                                speaker: ChatMessage.getSpeaker({ actor }),
-                                content
-                            })
-                        }
-                        // Re-render sheet if open
-                        if (actor.sheet?.rendered) actor.sheet.render(false)
-                    }
-                } catch (error) {
-                    console.error(`${MODULE.ID} | Failed applying Short Rest`, error)
-                    ui.notifications?.error?.('Failed to apply Short Rest. See console for details.')
-                }
-                break
-            }
-
-            // Long Rest
+            case 'shortRest':
             case 'longRest': {
                 if (!actor) break
-                // Mirror system permission checks
                 if (!game.user?.isGM && !actor?.isOwner) {
                     ui.notifications?.warn?.('You do not have permission to rest this actor.')
                     break
                 }
-                try {
-                    const { applyLongRest, buildRestChatContent } = await import(_systemImportPath('src/ui/sheets/rest-workflow.js'))
-                    if (typeof applyLongRest === 'function') {
-                        const { line } = await applyLongRest(actor)
-                        if (line) {
-                            const content = buildRestChatContent('Long Rest', [line])
-                            await ChatMessage.create({
-                                user: game.user.id,
-                                speaker: ChatMessage.getSpeaker({ actor }),
-                                content
-                            })
-                        }
-                        // Re-render sheet if open
-                        if (actor.sheet?.rendered) actor.sheet.render(false)
-                    }
-                } catch (error) {
-                    console.error(`${MODULE.ID} | Failed applying Long Rest`, error)
-                    ui.notifications?.error?.('Failed to apply Long Rest. See console for details.')
+                const res = await SystemAdapter.applyRest({ actor, restType: actionId })
+                if (!res?.ok) {
+                    this.#notifyDispatchIssue('Unable to apply rest action.', {
+                        actorId: actor?.id,
+                        actionId,
+                        adapterPath: res?.path ?? 'none'
+                    })
                 }
+                if (actor.sheet?.rendered) actor.sheet.render(false)
                 break
             }
 
-            // Resource quick-access (Utility tab)
-            case 'resource-health': {
-                if (!actor) break
-                try {
-                    const { HPTempHPDialog } = await import(_systemImportPath('src/ui/apps/hp-temp-hp-dialog.js'))
-                    if (HPTempHPDialog?.show) await HPTempHPDialog.show(actor)
-                } catch (error) {
-                    console.error(`${MODULE.ID} | Failed opening Health dialog`, error)
-                }
-                break
-            }
-            case 'resource-stamina': {
-                if (!actor) break
-                try {
-                    const mod = await import(_systemImportPath('src/core/stamina/stamina-dialog.js'))
-                    const openStaminaDialog = mod?.openStaminaDialog
-                    if (typeof openStaminaDialog === 'function') await openStaminaDialog(actor)
-                } catch (error) {
-                    console.error(`${MODULE.ID} | Failed opening Stamina dialog`, error)
-                }
-                break
-            }
-            case 'resource-magicka': {
-                // Pre-wired for future system support. Silent no-op if not implemented.
-                if (!actor) break
-                try {
-                    const mod = await import(_systemImportPath('src/core/magic/magicka-dialog.js'))
-                    const openMagickaDialog = mod?.openMagickaDialog
-                    if (typeof openMagickaDialog === 'function') await openMagickaDialog(actor)
-                } catch (_e) {
-                    // No-op until the system exposes a Magicka dialog entrypoint.
-                }
-                break
-            }
+            case 'resource-health':
+            case 'resource-stamina':
+            case 'resource-magicka':
             case 'resource-luck': {
-                // Pre-wired for future system support. Silent no-op if not implemented.
                 if (!actor) break
-                try {
-                    const mod = await import(_systemImportPath('src/core/luck/luck-dialog.js'))
-                    const openLuckDialog = mod?.openLuckDialog
-                    if (typeof openLuckDialog === 'function') await openLuckDialog(actor)
-                } catch (_e) {
-                    // No-op until the system exposes a Luck dialog entrypoint.
+                const res = await SystemAdapter.openResourceDialog({ actor, resourceId: actionId })
+                if (!res?.ok) {
+                    this.#notifyDispatchIssue('Unable to open resource dialog.', {
+                        actorId: actor?.id,
+                        actionId,
+                        adapterPath: res?.path ?? 'none'
+                    })
                 }
                 break
             }

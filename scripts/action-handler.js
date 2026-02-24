@@ -1121,6 +1121,14 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 onClick: this.#makeCombatQuickOnClick({ combatAction: 'dash', action: 'dash', label: 'Dash' })
             })
 
+            // Delay - defer turn timing
+            actions.push({
+                id: 'delay',
+                name: coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.delay'),
+                encodedValue: ['delay', 'delay'].join(this.delimiter),
+                onClick: this.#makeCombatQuickOnClick({ combatAction: 'delay', action: 'delay', label: 'Delay' })
+            })
+
             // Disengage - retreat without attacks of opportunity
             actions.push({
                 id: 'disengage',
@@ -1143,6 +1151,25 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 name: coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.useItem'),
                 encodedValue: ['useItem', 'use'].join(this.delimiter),
                 onClick: this.#makeCombatQuickOnClick({ combatAction: 'use-item', action: 'use-item', label: 'Use Item' })
+            })
+
+            // Cast Magic (Instant / secondary lane)
+            actions.push({
+                id: 'cast-magic-instant',
+                name: coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.castMagicInstant'),
+                encodedValue: ['castMagic', 'instant'].join(this.delimiter)
+            })
+
+            // Extinguish Burning - explicit turn action for burning condition.
+            actions.push({
+                id: 'extinguish-burning',
+                name: coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.extinguishBurning'),
+                encodedValue: ['extinguishBurning', 'extinguish-burning'].join(this.delimiter),
+                onClick: this.#makeCombatQuickOnClick({
+                    combatAction: 'extinguish-burning',
+                    action: 'extinguish-burning',
+                    label: 'Put Out Fire'
+                })
             })
 
             // Reload Weapon (only if ranged weapon equipped)
@@ -1271,6 +1298,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             await this.#buildCoreSkills()
             await this.#buildMagicSkills()
             await this.#buildCombatStyles()
+            await this.#buildLanguages()
+            await this.#buildFactions()
         }
 
         /**
@@ -1475,6 +1504,48 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
         }
 
         /**
+         * Build languages.
+         * @private
+         */
+        async #buildLanguages () {
+            if (this.#getItemsCount() === 0) return
+            const groupData = { id: 'languages', type: 'system' }
+            const actions = []
+
+            for (const [itemId, itemData] of this.#getItemsOfType('language')) {
+                if (!itemData) continue
+                actions.push({
+                    id: itemId,
+                    name: itemData.name ?? 'Language',
+                    encodedValue: ['language', itemId].join(this.delimiter)
+                })
+            }
+
+            if (actions.length > 0) this.addActions(actions, groupData)
+        }
+
+        /**
+         * Build factions.
+         * @private
+         */
+        async #buildFactions () {
+            if (this.#getItemsCount() === 0) return
+            const groupData = { id: 'factions', type: 'system' }
+            const actions = []
+
+            for (const [itemId, itemData] of this.#getItemsOfType('faction')) {
+                if (!itemData) continue
+                actions.push({
+                    id: itemId,
+                    name: itemData.name ?? 'Faction',
+                    encodedValue: ['faction', itemId].join(this.delimiter)
+                })
+            }
+
+            if (actions.length > 0) this.addActions(actions, groupData)
+        }
+
+        /**
          * Build inventory
          * @private
          */
@@ -1484,7 +1555,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             await this.#buildWeapons()
             await this.#buildArmor()
             await this.#buildItems()
+            await this.#buildContainers()
             await this.#buildAmmunition()
+            await this.#buildScrolls()
         }
 
         /**
@@ -1586,6 +1659,30 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
         }
 
         /**
+         * Build containers.
+         * @private
+         */
+        async #buildContainers () {
+            const groupData = { id: 'containers', type: 'system' }
+            const actions = []
+
+            for (const [itemId, itemData] of this.#getItemsOfType('container')) {
+                if (!itemData) continue
+                const current = Number(itemData.system?.container_enc?.current ?? 0)
+                const max = Number(itemData.system?.container_enc?.max ?? 0)
+                const capacity = max > 0 ? `${current}/${max}` : ''
+                actions.push({
+                    id: itemId,
+                    name: itemData.name ?? 'Container',
+                    encodedValue: ['container', itemId].join(this.delimiter),
+                    ...(capacity ? { info1: { text: capacity } } : {})
+                })
+            }
+
+            if (actions.length > 0) this.addActions(actions, groupData)
+        }
+
+        /**
          * Build ammunition
          * @private
          */
@@ -1618,6 +1715,30 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             if (actions.length > 0) {
                 this.addActions(actions, groupData)
             }
+        }
+
+        /**
+         * Build scrolls.
+         * @private
+         */
+        async #buildScrolls () {
+            const groupData = { id: 'scrolls', type: 'system' }
+            const actions = []
+
+            for (const [itemId, itemData] of this.#getItemsOfType('scroll')) {
+                if (!itemData) continue
+                const quantity = Number(itemData.system?.quantity ?? 0)
+                const spellUuid = String(itemData.system?.spellUuid ?? '').trim()
+                actions.push({
+                    id: itemId,
+                    name: itemData.name ?? 'Scroll',
+                    encodedValue: ['scroll', itemId].join(this.delimiter),
+                    info1: { text: `x${quantity}` },
+                    ...(spellUuid ? { info2: { text: 'Linked Spell' } } : {})
+                })
+            }
+
+            if (actions.length > 0) this.addActions(actions, groupData)
         }
 
         /**

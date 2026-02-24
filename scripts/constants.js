@@ -26,9 +26,11 @@ export const ACTION_TYPE = {
     aim: 'tokenActionHud.uesrpg3ev4.aim',
     castMagic: 'tokenActionHud.uesrpg3ev4.castMagic',
     dash: 'tokenActionHud.uesrpg3ev4.dash',
+    delay: 'tokenActionHud.uesrpg3ev4.delay',
     disengage: 'tokenActionHud.uesrpg3ev4.disengage',
     hide: 'tokenActionHud.uesrpg3ev4.hide',
     useItem: 'tokenActionHud.uesrpg3ev4.useItem',
+    extinguishBurning: 'tokenActionHud.uesrpg3ev4.extinguishBurning',
     defensiveStance: 'tokenActionHud.uesrpg3ev4.defensiveStance',
     opportunityAttack: 'tokenActionHud.uesrpg3ev4.opportunityAttack',
     specialAction: 'tokenActionHud.uesrpg3ev4.specialAction',
@@ -43,7 +45,11 @@ export const ACTION_TYPE = {
     weapon: 'tokenActionHud.uesrpg3ev4.weapon',
     armor: 'tokenActionHud.uesrpg3ev4.armor',
     item: 'tokenActionHud.uesrpg3ev4.item',
+    container: 'tokenActionHud.uesrpg3ev4.container',
     ammunition: 'tokenActionHud.uesrpg3ev4.ammunition',
+    scroll: 'tokenActionHud.uesrpg3ev4.scroll',
+    language: 'tokenActionHud.uesrpg3ev4.language',
+    faction: 'tokenActionHud.uesrpg3ev4.faction',
 
     // Spells
     spell: 'tokenActionHud.uesrpg3ev4.spell',
@@ -90,12 +96,16 @@ export const GROUP = {
     coreSkills: { id: 'coreSkills', name: 'tokenActionHud.uesrpg3ev4.coreSkills', type: 'system' },
     magicSkills: { id: 'magicSkills', name: 'tokenActionHud.uesrpg3ev4.magicSkills', type: 'system' },
     combatStyles: { id: 'combatStyles', name: 'tokenActionHud.uesrpg3ev4.combatStyles', type: 'system' },
+    languages: { id: 'languages', name: 'tokenActionHud.uesrpg3ev4.languages', type: 'system' },
+    factions: { id: 'factions', name: 'tokenActionHud.uesrpg3ev4.factions', type: 'system' },
 
     // Inventory
     weapons: { id: 'weapons', name: 'tokenActionHud.uesrpg3ev4.weapons', type: 'system' },
     armor: { id: 'armor', name: 'tokenActionHud.uesrpg3ev4.armor', type: 'system' },
     items: { id: 'items', name: 'tokenActionHud.uesrpg3ev4.items', type: 'system' },
+    containers: { id: 'containers', name: 'tokenActionHud.uesrpg3ev4.containers', type: 'system' },
     ammunition: { id: 'ammunition', name: 'tokenActionHud.uesrpg3ev4.ammunition', type: 'system' },
+    scrolls: { id: 'scrolls', name: 'tokenActionHud.uesrpg3ev4.scrolls', type: 'system' },
 
     // Spells by School
     alterationSpells: { id: 'alterationSpells', name: 'tokenActionHud.uesrpg3ev4.alterationSpells', type: 'system' },
@@ -145,12 +155,16 @@ export const ITEM_TYPE = {
     weapon: { groupId: 'weapons' },
     armor: { groupId: 'armor' },
     item: { groupId: 'items' },
+    container: { groupId: 'containers' },
     ammunition: { groupId: 'ammunition' },
+    scroll: { groupId: 'scrolls' },
     spell: { groupId: 'spells' },
     talent: { groupId: 'talents' },
     trait: { groupId: 'traits' },
     power: { groupId: 'powers' },
     skill: { groupId: 'coreSkills' },
     magicSkill: { groupId: 'magicSkills' },
-    combatStyle: { groupId: 'combatStyles' }
+    combatStyle: { groupId: 'combatStyles' },
+    language: { groupId: 'languages' },
+    faction: { groupId: 'factions' }
 }

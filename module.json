@@ -10,7 +10,7 @@
   ],
   "url": "https://github.com/varys1337/fvtt-token-action-hud-uesrpg3ev4",
   "flags": {},
-  "version": "1.0.15",
+  "version": "1.1.0",
   "compatibility": {
     "minimum": "13",
     "verified": "13.351"
@@ -38,7 +38,7 @@
         "compatibility": [
           {
             "minimum": "1.0.0",
-            "verified": "v1.0.0-RC.84"
+            "verified": "v1.0.0-RC.84+"
           }
         ]
       }

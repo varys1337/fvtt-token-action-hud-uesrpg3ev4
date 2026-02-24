@@ -7,6 +7,7 @@ import {
     invalidateBuildCacheByKey
 } from './cache.js'
 import { registerBuildExtension, unregisterBuildExtension } from './extensions.js'
+import { SystemAdapter } from './system-adapter.js'
 
 // Cache last known HUD root from render hook for idempotent re-ensures.
 let _lastHudRootEl = null
@@ -302,7 +303,8 @@ Hooks.on('tokenActionHudCoreApiReady', async () => {
     const module = game.modules.get(MODULE.ID)
     module.api = {
         requiredCoreModuleVersion: REQUIRED_CORE_MODULE_VERSION,
-        SystemManager
+        SystemManager,
+        adapterCapabilities: SystemAdapter.diagnosticsSnapshot()
     }
     Hooks.call('tokenActionHudSystemReady', module)
 })
@@ -595,8 +597,9 @@ async function incrementAttackCount (attackerActor) {
 function _resolveChatHtmlRoot (html) {
     if (!html) return null
     if (html instanceof HTMLElement) return html
-    if (html?.[0] instanceof HTMLElement) return html[0]
     if (html?.element instanceof HTMLElement) return html.element
+    // Defensive fallback for array-like wrappers returned by some render pipelines.
+    if (html?.[0] instanceof HTMLElement) return html[0]
     return null
 }
 
@@ -653,11 +656,6 @@ Hooks.on('renderChatMessageHTML', (message, html) => {
     _bindAttackCommitListeners(message, html)
 })
 
-// Backwards compatibility for older render hook signatures (jQuery/legacy).
-Hooks.on('renderChatMessage', (message, html) => {
-    _bindAttackCommitListeners(message, html)
-})
-
 // ---------------------------------------------------------------------------
 // Phase 4: Public, minimal API surface for additive integrations.
 // ---------------------------------------------------------------------------
@@ -676,7 +674,9 @@ Hooks.once('ready', () => {
         unregisterBuildExtension,
         invalidateCacheByActorId: invalidateBuildCacheByActorId,
         invalidateCacheByTokenId: invalidateBuildCacheByKey,
-        invalidateAllCaches: invalidateAllBuildCaches
+        invalidateAllCaches: invalidateAllBuildCaches,
+        adapterCapabilities: SystemAdapter.diagnosticsSnapshot(),
+        getAdapterDiagnostics: () => SystemAdapter.diagnosticsSnapshot()
     }
 
     debugLog('API ready')
