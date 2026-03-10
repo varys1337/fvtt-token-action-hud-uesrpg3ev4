@@ -219,6 +219,49 @@
     opacity: 1;
 }
 
+#token-action-hud .uesrpg-synthetic-subgroup {
+    width: fit-content;
+    max-width: 100%;
+}
+
+#token-action-hud .uesrpg-synthetic-subgroup-body {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+#token-action-hud .uesrpg-synthetic-subgroup-title,
+#token-action-hud .tah-list-subgroup .tah-list-subgroup-title {
+    cursor: default;
+    color: #dcc9a5;
+    text-shadow: var(--tah-text-shadow), 0 0 8px rgb(255 100 0 / 18%);
+}
+
+#token-action-hud .uesrpg-synthetic-subgroup-actions {
+    align-items: center;
+    display: grid;
+    gap: var(--tah-gap);
+    grid-template-columns: repeat(4, max-content);
+    width: fit-content;
+    max-width: 100%;
+}
+
+#token-action-hud .uesrpg-synthetic-subgroup-actions > .tah-action {
+    min-width: 0;
+}
+
+@media (max-width: 1400px) {
+    #token-action-hud .uesrpg-synthetic-subgroup-actions {
+        grid-template-columns: repeat(3, max-content);
+    }
+}
+
+@media (max-width: 1024px) {
+    #token-action-hud .uesrpg-synthetic-subgroup-actions {
+        grid-template-columns: repeat(2, max-content);
+    }
+}
+
 .tah-ap-tracker.disabled,
 .tah-ap-tracker[aria-disabled="true"] {
     pointer-events: none;

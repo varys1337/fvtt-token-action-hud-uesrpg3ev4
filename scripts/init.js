@@ -17,6 +17,7 @@ let _trackerUpdateTimer = null
 let _lastTrackerLabel = null
 let _lastTrackerActorId = null
 let _lastTrackerEnsureRequested = false
+const _pendingAttackTrackerBackups = new Set()
 
 
 
@@ -134,6 +135,67 @@ function resolveTabInsertionContext (utilityControl, hudRoot) {
     }
 
     return null
+}
+
+function ensureCharacteristicsSubgroup (app, html) {
+    const hudRoot = getHudRoot(app, html)
+    if (!hudRoot) return
+
+    const skillsGroup = hudRoot.querySelector('[data-nest-id="skills"]')
+    if (!skillsGroup) return
+
+    const realCharacteristics = skillsGroup.querySelector('[data-nest-id="skills_characteristics"]')
+    const coreSkills = skillsGroup.querySelector('[data-nest-id="skills_coreSkills"]')
+    if (!coreSkills) return
+
+    const mirroredActions = Array.from(coreSkills.querySelectorAll('[data-part="action"]'))
+        .filter(actionEl => {
+            const btn = actionEl.querySelector('[data-part="actionButton"]')
+            return String(btn?.value ?? '').startsWith('characteristic|')
+        })
+
+    const synthetic = skillsGroup.querySelector('[data-uesrpg-synthetic-subgroup="characteristics"]')
+
+    // If the saved layout already includes the real Characteristics subgroup, remove mirrored fallback copies.
+    if (realCharacteristics) {
+        mirroredActions.forEach(node => node.remove())
+        synthetic?.remove()
+        return
+    }
+
+    if (!mirroredActions.length) {
+        synthetic?.remove()
+        return
+    }
+
+    const listSubgroups = coreSkills.parentElement
+    if (!listSubgroups) return
+
+    let subgroup = synthetic
+    if (!subgroup) {
+        subgroup = document.createElement('div')
+        subgroup.className = 'uesrpg-synthetic-subgroup'
+        subgroup.dataset.uesrpgSyntheticSubgroup = 'characteristics'
+
+        subgroup.innerHTML = `
+            <div class="tah-list-subgroup uesrpg-synthetic-subgroup-body">
+                <div class="tah-list-subgroup-title uesrpg-synthetic-subgroup-title">
+                    <div class="tah-list-subgroup-title-text">${game.i18n.localize('tokenActionHud.uesrpg3ev4.characteristics')}</div>
+                </div>
+                <div class="tah-subgroups uesrpg-synthetic-subgroups">
+                    <div class="tah-actions uesrpg-synthetic-subgroup-actions"></div>
+                </div>
+            </div>
+        `
+    }
+
+    const actionsContainer = subgroup.querySelector('.uesrpg-synthetic-subgroup-actions')
+    if (!actionsContainer) return
+
+    mirroredActions.forEach(node => actionsContainer.appendChild(node))
+    if (subgroup.parentElement !== listSubgroups || subgroup !== coreSkills.previousElementSibling) {
+        listSubgroups.insertBefore(subgroup, coreSkills)
+    }
 }
 
 /**
@@ -404,7 +466,7 @@ function ensureActionsTrackerTab (app, html) {
             btn.classList.toggle('disabled', !enabled)
         }
     } catch (err) {
-        console.warn('TAH UESRPG3e | Failed to ensure Actions tracker tab', err)
+        console.warn(`${MODULE.ID} | Failed to ensure Actions tracker tab`, err)
     }
 }
 
@@ -413,6 +475,7 @@ function ensureActionsTrackerTab (app, html) {
 Hooks.on('renderTokenActionHud', (app, html) => {
     // Inject once per render; updates are debounced to avoid bursty DOM writes.
     scheduleActionsTrackerUpdate({ ensure: true, app, html, immediate: true })
+    ensureCharacteristicsSubgroup(app, html)
 })
 
 // Some Token Action HUD Core versions emit a "forceUpdate" hook (e.g. when the selected token changes).
@@ -552,7 +615,7 @@ Hooks.on('updateCombat', (combat, updateData, options, userId) => {
  */
 async function incrementAttackCount (attackerActor) {
     if (!attackerActor) return
-    
+
     try {
         // Try to use the system's AttackTracker first (preferred method)
         try {
@@ -583,7 +646,7 @@ async function incrementAttackCount (attackerActor) {
             'system.combat_tracking.attacks_this_round': current + 1
         })
     } catch (error) {
-        console.error('Error incrementing attack count:', error)
+        console.error(`${MODULE.ID} | Error incrementing attack count`, error)
     }
 }
 
@@ -604,6 +667,10 @@ function _resolveChatHtmlRoot (html) {
 }
 
 async function _onOpposedCommitClicked (message) {
+    const messageId = String(message?.id ?? '')
+    if (messageId && _pendingAttackTrackerBackups.has(messageId)) return
+    if (messageId) _pendingAttackTrackerBackups.add(messageId)
+
     try {
         // Get the message flags to find the attacker
         const workflowData = message?.flags?.['uesrpg-3ev4']?.opposedWorkflow ||
@@ -629,10 +696,22 @@ async function _onOpposedCommitClicked (message) {
         const attackerToken = attackerDoc?.document ?? attackerDoc
         const attackerActor = attackerToken?.actor ?? attackerDoc
 
-        // Increment attack count as backup (system should already do this, but ensure HUD updates)
-        if (attackerActor) await incrementAttackCount(attackerActor)
+        if (!attackerActor) return
+
+        const beforeCount = Number(attackerActor.system?.combat_tracking?.attacks_this_round ?? 0)
+
+        // Give the system workflow a chance to apply its canonical increment first.
+        await new Promise(resolve => setTimeout(resolve, 150))
+
+        const latestActor = game.actors?.get?.(attackerActor.id) ?? attackerActor
+        const afterCount = Number(latestActor.system?.combat_tracking?.attacks_this_round ?? 0)
+        if (afterCount > beforeCount) return
+
+        await incrementAttackCount(latestActor)
     } catch (error) {
-        console.error('Error incrementing attack count from button click:', error)
+        console.error(`${MODULE.ID} | Error incrementing attack count from button click`, error)
+    } finally {
+        if (messageId) _pendingAttackTrackerBackups.delete(messageId)
     }
 }
 

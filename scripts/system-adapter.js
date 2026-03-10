@@ -39,6 +39,10 @@ function _resolveToken (actor, explicitToken = null) {
     return actor?.getActiveTokens?.()?.[0] ?? null
 }
 
+function _getTokenActionHudApi () {
+    return game?.uesrpg?.api?.tokenActionHud ?? null
+}
+
 export class SystemAdapter {
     static capabilities = {
         hasRuntimeApi: false,
@@ -47,7 +51,7 @@ export class SystemAdapter {
     }
 
     static refreshCapabilities () {
-        const runtime = game?.uesrpg ?? null
+        const runtime = _getTokenActionHudApi()
         SystemAdapter.capabilities.hasRuntimeApi = !!runtime
         SystemAdapter.capabilities.lastResolvedAt = Date.now()
         return { ...SystemAdapter.capabilities }
@@ -72,6 +76,11 @@ export class SystemAdapter {
 
     static async executeCombatQuickAction ({ actor, token = null, payload = {}, shiftKey = false } = {}) {
         if (!actor) return { ok: false, path: 'none', reason: 'no-actor' }
+        const api = _getTokenActionHudApi()
+        if (typeof api?.executeCombatQuickAction === 'function') {
+            return api.executeCombatQuickAction({ actor, token, payload, shiftKey })
+        }
+        SystemAdapter.logDiagnostics('Using transitional fallback', { method: 'executeCombatQuickAction', path: 'src/ui/sheets/shared/listeners/combat-actions.js' })
 
         const resolvedToken = _resolveToken(actor, token)
         const dataset = {
@@ -103,6 +112,11 @@ export class SystemAdapter {
 
     static async executeCastMagic ({ actor, token = null, preselectedSpell = null, shiftKey = false, castActionType = 'primary' } = {}) {
         if (!actor) return { ok: false, path: 'none', reason: 'no-actor' }
+        const api = _getTokenActionHudApi()
+        if (typeof api?.executeCastMagic === 'function') {
+            return api.executeCastMagic({ actor, token, preselectedSpell, shiftKey, castActionType })
+        }
+        SystemAdapter.logDiagnostics('Using transitional fallback', { method: 'executeCastMagic', path: 'src/ui/sheets/shared/listeners/magic-cast.js' })
 
         const resolvedToken = _resolveToken(actor, token)
         const target = _makeSyntheticTarget({ actionType: castActionType === 'secondary' ? 'secondary' : 'primary' })
@@ -128,6 +142,11 @@ export class SystemAdapter {
 
     static async executeSkillRoll ({ actor, itemId, shiftKey = false } = {}) {
         if (!actor || !itemId) return { ok: false, path: 'none', reason: 'bad-args' }
+        const api = _getTokenActionHudApi()
+        if (typeof api?.executeSkillRoll === 'function') {
+            return api.executeSkillRoll({ actor, itemId, shiftKey })
+        }
+        SystemAdapter.logDiagnostics('Using transitional fallback', { method: 'executeSkillRoll', path: 'src/ui/sheets/shared/listeners/rolls.js' })
         const target = {
             dataset: { itemId },
             closest: () => ({ dataset: { itemId } })
@@ -153,6 +172,11 @@ export class SystemAdapter {
 
     static async executeCombatRoll ({ actor, itemId, shiftKey = false } = {}) {
         if (!actor || !itemId) return { ok: false, path: 'none', reason: 'bad-args' }
+        const api = _getTokenActionHudApi()
+        if (typeof api?.executeCombatRoll === 'function') {
+            return api.executeCombatRoll({ actor, itemId, shiftKey })
+        }
+        SystemAdapter.logDiagnostics('Using transitional fallback', { method: 'executeCombatRoll', path: 'src/ui/sheets/shared/listeners/rolls.js' })
         const target = {
             dataset: { itemId },
             closest: () => ({ dataset: { itemId } })
@@ -178,6 +202,11 @@ export class SystemAdapter {
 
     static async executeCharacteristicRoll ({ actor, key, label, shiftKey = false } = {}) {
         if (!actor || !key || !label) return { ok: false, path: 'none', reason: 'bad-args' }
+        const api = _getTokenActionHudApi()
+        if (typeof api?.executeCharacteristicRoll === 'function') {
+            return api.executeCharacteristicRoll({ actor, key, label, shiftKey })
+        }
+        SystemAdapter.logDiagnostics('Using transitional fallback', { method: 'executeCharacteristicRoll', path: 'src/ui/sheets/shared/listeners/characteristics-handlers.js' })
 
         const target = document.createElement('span')
         target.id = key
@@ -203,6 +232,11 @@ export class SystemAdapter {
 
     static async executeFeatureActivation ({ item, actor, event = null } = {}) {
         if (!item) return { ok: false, path: 'none', reason: 'no-item' }
+        const api = _getTokenActionHudApi()
+        if (typeof api?.executeFeatureActivation === 'function') {
+            return api.executeFeatureActivation({ item, actor, event })
+        }
+        SystemAdapter.logDiagnostics('Using transitional fallback', { method: 'executeFeatureActivation', path: 'src/ui/sheets/shared-handlers.js' })
 
         const mod = await _importFirst([
             _systemImportPath('src/ui/sheets/shared-handlers.js')
@@ -242,6 +276,11 @@ export class SystemAdapter {
 
     static async executeScrollCast ({ actor, scrollItem, castActionType = 'primary' } = {}) {
         if (!actor || !scrollItem) return { ok: false, path: 'none', reason: 'bad-args' }
+        const api = _getTokenActionHudApi()
+        if (typeof api?.executeScrollCast === 'function') {
+            return api.executeScrollCast({ actor, scrollItem, castActionType })
+        }
+        SystemAdapter.logDiagnostics('Using transitional fallback', { method: 'executeScrollCast', path: 'src/core/magic/scroll-casting.js' })
 
         const mod = await _importFirst([
             _systemImportPath('src/core/magic/scroll-casting.js')
@@ -261,6 +300,11 @@ export class SystemAdapter {
 
     static async openResourceDialog ({ actor, resourceId } = {}) {
         if (!actor || !resourceId) return { ok: false, path: 'none', reason: 'bad-args' }
+        const api = _getTokenActionHudApi()
+        if (typeof api?.openResourceDialog === 'function') {
+            return api.openResourceDialog({ actor, resourceId })
+        }
+        SystemAdapter.logDiagnostics('Using transitional fallback', { method: 'openResourceDialog', path: resourceId })
 
         if (resourceId === 'resource-health') {
             const mod = await _importFirst([_systemImportPath('src/ui/apps/hp-temp-hp-dialog.js')])
@@ -300,6 +344,11 @@ export class SystemAdapter {
 
     static async applyRest ({ actor, restType } = {}) {
         if (!actor || !restType) return { ok: false, path: 'none', reason: 'bad-args' }
+        const api = _getTokenActionHudApi()
+        if (typeof api?.applyRest === 'function') {
+            return api.applyRest({ actor, restType })
+        }
+        SystemAdapter.logDiagnostics('Using transitional fallback', { method: 'applyRest', path: 'src/ui/sheets/rest-workflow.js' })
 
         const mod = await _importFirst([_systemImportPath('src/ui/sheets/rest-workflow.js')])
         if (!mod) return { ok: false, path: 'none', reason: 'no-rest-module' }
@@ -319,21 +368,31 @@ export class SystemAdapter {
         return { ok: true, path: `rest-workflow.${restType}` }
     }
 
-    static async openSocialSelector ({ actor, kind } = {}) {
+    static async openSocialSelector ({ actor, kind, entryId = null } = {}) {
         if (!actor || !kind) return { ok: false, path: 'none', reason: 'bad-args' }
+        const api = _getTokenActionHudApi()
+        if (typeof api?.openSocialSelector === 'function') {
+            return api.openSocialSelector({ actor, kind, entryId })
+        }
+        SystemAdapter.logDiagnostics('Using transitional fallback', { method: 'openSocialSelector', path: 'src/ui/apps/v2/social-selectors.js' })
         const mod = await _importFirst([_systemImportPath('src/ui/apps/v2/social-selectors.js')])
         if (kind === 'language' && mod?.LanguageSelectorAppV2?.prompt) {
             await mod.LanguageSelectorAppV2.prompt(actor)
-            return { ok: true, path: 'LanguageSelectorAppV2.prompt' }
+            return { ok: true, path: 'LanguageSelectorAppV2.prompt', entryId, focusedOpenSupported: false }
         }
         if (kind === 'faction' && mod?.FactionSelectorAppV2?.prompt) {
             await mod.FactionSelectorAppV2.prompt(actor)
-            return { ok: true, path: 'FactionSelectorAppV2.prompt' }
+            return { ok: true, path: 'FactionSelectorAppV2.prompt', entryId, focusedOpenSupported: false }
         }
         return { ok: false, path: 'none', reason: 'no-social-selector' }
     }
 
     static async getSpecialActionDefinition (id) {
+        const api = _getTokenActionHudApi()
+        if (typeof api?.getSpecialActionDefinition === 'function') {
+            return api.getSpecialActionDefinition(id)
+        }
+        SystemAdapter.logDiagnostics('Using transitional fallback', { method: 'getSpecialActionDefinition', path: 'src/core/combat/combat-style-utils.js' })
         const mod = await _importFirst([_systemImportPath('src/core/combat/combat-style-utils.js')])
         if (typeof mod?.getSpecialActionById === 'function') {
             return mod.getSpecialActionById(id)
@@ -341,8 +400,26 @@ export class SystemAdapter {
         return null
     }
 
+    static async buildSpecialActionsForActor (actor) {
+        const api = _getTokenActionHudApi()
+        if (typeof api?.buildSpecialActionsForActor === 'function') {
+            return api.buildSpecialActionsForActor(actor)
+        }
+        SystemAdapter.logDiagnostics('Using transitional fallback', { method: 'buildSpecialActionsForActor', path: 'src/core/combat/combat-style-utils.js' })
+        const mod = await _importFirst([_systemImportPath('src/core/combat/combat-style-utils.js')])
+        if (typeof mod?.buildSpecialActionsForActor === 'function') {
+            return mod.buildSpecialActionsForActor(actor) ?? []
+        }
+        return []
+    }
+
     static async setItemEquipped ({ item, equipped } = {}) {
         if (!item) return { ok: false, path: 'none', reason: 'no-item' }
+        const api = _getTokenActionHudApi()
+        if (typeof api?.setItemEquipped === 'function') {
+            return api.setItemEquipped({ item, equipped })
+        }
+        SystemAdapter.logDiagnostics('Using transitional fallback', { method: 'setItemEquipped', path: 'item.update.system.equipped' })
 
         const desired = Boolean(equipped)
         if (typeof item.update === 'function') {
@@ -351,6 +428,42 @@ export class SystemAdapter {
         }
 
         return { ok: false, path: 'none', reason: 'no-item-update' }
+    }
+
+    static async openDocumentSheet ({ document } = {}) {
+        const api = _getTokenActionHudApi()
+        if (typeof api?.openDocumentSheet === 'function') {
+            return api.openDocumentSheet({ document })
+        }
+        if (!document?.sheet || typeof document.sheet.render !== 'function') {
+            return { ok: false, path: 'none', reason: 'no-sheet' }
+        }
+        document.sheet.render(true)
+        return { ok: true, path: 'document.sheet.render' }
+    }
+
+    static async runFeaturePostChatAutomation ({ item, actor = null, event = null } = {}) {
+        if (!item) return { ok: false, path: 'none', reason: 'no-item' }
+        const api = _getTokenActionHudApi()
+        if (typeof api?.runFeaturePostChatAutomation === 'function') {
+            return api.runFeaturePostChatAutomation({ item, actor, event })
+        }
+        SystemAdapter.logDiagnostics('Using transitional fallback', { method: 'runFeaturePostChatAutomation', path: 'src/core/system/activation/activation-executor.js' })
+        const activationMod = await _importFirst([
+            _systemImportPath('src/core/system/activation/activation-executor.js')
+        ])
+        if (typeof activationMod?.executeItemActivation === 'function') {
+            await activationMod.executeItemActivation({
+                item,
+                actor: actor ?? item.actor ?? null,
+                event,
+                renderChat: false,
+                includeImage: false,
+                context: {}
+            })
+            return { ok: true, path: 'activation-executor.executeItemActivation.renderChatFalse' }
+        }
+        return { ok: false, path: 'none', reason: 'no-feature-post-chat-handler' }
     }
 }
 

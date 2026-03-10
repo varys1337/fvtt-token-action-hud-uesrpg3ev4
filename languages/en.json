@@ -41,6 +41,7 @@
       "combatStyles": "Combat Styles",
       "weapons": "Weapons",
       "armor": "Armor",
+      "shields": "Shields",
       "items": "Items",
       "containers": "Containers",
       "ammunition": "Ammunition",
@@ -81,6 +82,7 @@
       "magicSkill": "Magic Skill",
       "combatStyle": "Combat Style",
       "weapon": "Weapon",
+      "shield": "Shield",
       "item": "Item",
       "container": "Container",
       "spell": "Spell",
@@ -90,6 +92,8 @@
       "power": "Power",
       "language": "Language",
       "faction": "Faction",
+      "manageLanguages": "Manage Languages",
+      "manageFactions": "Manage Factions",
       "settings": {
         "displayUnequipped": {
           "hint": "Display unequipped weapons and armor in the HUD",

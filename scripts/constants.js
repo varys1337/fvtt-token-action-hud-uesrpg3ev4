@@ -23,6 +23,8 @@ export const REQUIRED_CORE_MODULE_VERSION = '2.0'
 export const ACTION_TYPE = {
     // Combat Actions
     attack: 'tokenActionHud.uesrpg3ev4.attack',
+    meleeWeaponAttack: 'tokenActionHud.uesrpg3ev4.meleeWeaponAttack',
+    rangedWeaponAttack: 'tokenActionHud.uesrpg3ev4.rangedWeaponAttack',
     aim: 'tokenActionHud.uesrpg3ev4.aim',
     castMagic: 'tokenActionHud.uesrpg3ev4.castMagic',
     dash: 'tokenActionHud.uesrpg3ev4.dash',
@@ -44,12 +46,17 @@ export const ACTION_TYPE = {
     // Inventory
     weapon: 'tokenActionHud.uesrpg3ev4.weapon',
     armor: 'tokenActionHud.uesrpg3ev4.armor',
+    shield: 'tokenActionHud.uesrpg3ev4.shield',
     item: 'tokenActionHud.uesrpg3ev4.item',
     container: 'tokenActionHud.uesrpg3ev4.container',
     ammunition: 'tokenActionHud.uesrpg3ev4.ammunition',
     scroll: 'tokenActionHud.uesrpg3ev4.scroll',
     language: 'tokenActionHud.uesrpg3ev4.language',
     faction: 'tokenActionHud.uesrpg3ev4.faction',
+    languageEntry: 'tokenActionHud.uesrpg3ev4.languageEntry',
+    factionEntry: 'tokenActionHud.uesrpg3ev4.factionEntry',
+    manageLanguages: 'tokenActionHud.uesrpg3ev4.manageLanguages',
+    manageFactions: 'tokenActionHud.uesrpg3ev4.manageFactions',
 
     // Spells
     spell: 'tokenActionHud.uesrpg3ev4.spell',
@@ -102,6 +109,7 @@ export const GROUP = {
     // Inventory
     weapons: { id: 'weapons', name: 'tokenActionHud.uesrpg3ev4.weapons', type: 'system' },
     armor: { id: 'armor', name: 'tokenActionHud.uesrpg3ev4.armor', type: 'system' },
+    shields: { id: 'shields', name: 'tokenActionHud.uesrpg3ev4.shields', type: 'system' },
     items: { id: 'items', name: 'tokenActionHud.uesrpg3ev4.items', type: 'system' },
     containers: { id: 'containers', name: 'tokenActionHud.uesrpg3ev4.containers', type: 'system' },
     ammunition: { id: 'ammunition', name: 'tokenActionHud.uesrpg3ev4.ammunition', type: 'system' },
@@ -139,7 +147,7 @@ export const GROUP = {
     // Actions Tracker (non-clickable display only)
     actionsTracker: { id: 'actionsTracker', name: 'tokenActionHud.uesrpg3ev4.actionsTracker', type: 'system' },
 
-    // Resources (display-only badges)
+    // Resources (quick-access badges and dialogs)
     resources: { id: 'resources', name: 'tokenActionHud.uesrpg3ev4.resources', type: 'system' },
 
     // Utility
@@ -154,6 +162,7 @@ export const GROUP = {
 export const ITEM_TYPE = {
     weapon: { groupId: 'weapons' },
     armor: { groupId: 'armor' },
+    shield: { groupId: 'shields' },
     item: { groupId: 'items' },
     container: { groupId: 'containers' },
     ammunition: { groupId: 'ammunition' },

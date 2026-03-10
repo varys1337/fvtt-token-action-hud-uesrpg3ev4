@@ -45,6 +45,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 groups: [
                     { ...groups.weapons, nestId: 'inventory_weapons' },
                     { ...groups.armor, nestId: 'inventory_armor' },
+                    { ...groups.shields, nestId: 'inventory_shields' },
                     { ...groups.items, nestId: 'inventory_items' },
                     { ...groups.containers, nestId: 'inventory_containers' },
                     { ...groups.ammunition, nestId: 'inventory_ammunition' },

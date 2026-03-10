@@ -1,12 +1,6 @@
 import { MODULE } from './constants.js'
-import { getSystemModulePath, diagLog } from './utils.js'
-
-function _systemImportPath (relativePath) {
-    const p = getSystemModulePath(relativePath)
-    if (p) return p
-    const clean = String(relativePath ?? '').replace(/^\/+/, '')
-    return `/systems/uesrpg-3ev4/${clean}`
-}
+import { diagLog } from './utils.js'
+import { SystemAdapter } from './system-adapter.js'
 
 function _isStrictDiagnosticsEnabled () {
     try {
@@ -75,14 +69,13 @@ export async function executeCombatQuickActionForActor (actor, payload = {}, opt
     const sheet = actor?.sheet ?? { actor, token, element: null }
 
     try {
-        if (sheet && typeof sheet._onCombatQuickAction === 'function') {
-            await sheet._onCombatQuickAction(event, target)
-            return true
-        }
-
-        const { onCombatQuickAction } = await import(_systemImportPath('src/ui/sheets/shared/listeners/combat-actions.js'))
-        if (typeof onCombatQuickAction === 'function') {
-            await onCombatQuickAction.call(sheet, event, target)
+        const res = await SystemAdapter.executeCombatQuickAction({
+            actor,
+            token,
+            payload: dataset,
+            shiftKey: opts?.shiftKey ?? false
+        })
+        if (res?.ok) {
             return true
         }
     } catch (err) {
@@ -98,4 +91,3 @@ export async function executeCombatQuickActionForActor (actor, payload = {}, opt
     })
     return false
 }
-
