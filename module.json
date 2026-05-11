@@ -5,54 +5,46 @@
   "authors": [
     {
       "name": "Larkinabout",
-      "url": "https://github.com/Larkinabout"
+      "url": "https://github.com/Larkinabout",
+      "flags": {}
     }
   ],
   "url": "https://github.com/varys1337/fvtt-token-action-hud-uesrpg3ev4",
-  "flags": {},
-  "version": "1.1.0",
+  "version": "1.2.0",
   "compatibility": {
-    "minimum": "13",
-    "verified": "13.351"
+    "minimum": "14.359",
+    "verified": "14.360",
+    "maximum": "14.999"
   },
   "esmodules": [
-    "./scripts/init.js"
+    "scripts/init.js"
   ],
-  "scripts": [],
   "styles": [
-    "./styles/token-action-hud-uesrpg3ev4.css"
+    {
+      "src": "styles/token-action-hud-uesrpg3ev4.css"
+    }
   ],
   "languages": [
     {
       "lang": "en",
       "name": "English",
-      "path": "languages/en.json"
+      "path": "languages/en.json",
+      "flags": {}
     }
   ],
-  "packs": [],
   "relationships": {
     "systems": [
       {
         "id": "uesrpg-3ev4",
         "type": "system",
-        "compatibility": [
-          {
-            "minimum": "1.0.0",
-            "verified": "v1.0.0-RC.84+"
-          }
-        ]
+        "compatibility": {}
       }
     ],
     "requires": [
       {
         "id": "token-action-hud-core",
         "type": "module",
-        "compatibility": [
-          {
-            "minimum": "2.0.0",
-            "verified": "2.0.16"
-          }
-        ]
+        "compatibility": {}
       }
     ],
     "optional": [],
@@ -60,11 +52,8 @@
       "optional": []
     }
   },
-  "socket": false,
   "manifest": "https://github.com/varys1337/fvtt-token-action-hud-uesrpg3ev4/releases/download/%25TAG%25/module.json",
   "download": "https://github.com/varys1337/fvtt-token-action-hud-uesrpg3ev4/releases/download/%25TAG%25/module.zip",
   "readme": "https://github.com/varys1337/fvtt-token-action-hud-uesrpg3ev4/blob/main/readme.md",
-  "protected": false,
-  "coreTranslation": false,
-  "library": false
+  "flags": {}
 }

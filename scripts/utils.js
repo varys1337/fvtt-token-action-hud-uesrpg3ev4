@@ -19,7 +19,7 @@ export function resolveSupportedActorTypes () {
     if (model && typeof model === 'object') {
         const keys = Object.keys(model)
         const intersection = keys.filter(k => KNOWN_ACTOR_TYPES.has(k))
-        SUPPORTED_ACTOR_TYPES = new Set(intersection.length ? intersection : keys)
+        SUPPORTED_ACTOR_TYPES = new Set(intersection.length ? intersection : KNOWN_ACTOR_TYPES)
         return SUPPORTED_ACTOR_TYPES
     }
 

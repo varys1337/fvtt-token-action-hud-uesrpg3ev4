@@ -6,7 +6,6 @@ import {
     invalidateBuildCacheByActorId,
     invalidateBuildCacheByKey,
     registerBuildCacheInvalidationHooks,
-    safeModifiedTime,
     setBuildCacheEntry
 } from './cache.js'
 import { runBuildExtensions } from './extensions.js'
@@ -463,6 +462,130 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
         }
 
         /**
+         * Get all indexed item entries.
+         * @private
+         * @returns {Array<[string, any]>}
+         */
+        #getAllItemEntries () {
+            const byType = this._itemIndex?.byType
+            if (!byType || typeof byType.values !== 'function') return Array.from(this.#getItemsIterator())
+
+            const entries = []
+            for (const typedEntries of byType.values()) {
+                if (Array.isArray(typedEntries)) entries.push(...typedEntries)
+            }
+            return entries
+        }
+
+        /**
+         * Does the provided value represent at least one configured cast enchantment?
+         * @private
+         * @param {any} value
+         * @returns {boolean}
+         */
+        #hasCastEnchantmentEntries (value) {
+            if (value == null || value === false) return false
+            if (typeof value === 'string') return value.trim().length > 0
+            if (typeof value === 'number') return false
+            if (Array.isArray(value)) return value.some(entry => this.#hasCastEnchantmentEntries(entry))
+            if (value instanceof Map || value instanceof Set) return Array.from(value.values()).some(entry => this.#hasCastEnchantmentEntries(entry))
+            if (typeof value !== 'object') return false
+
+            if (value.enabled === false) return false
+
+            const explicitSpellKeys = [
+                'spellId',
+                'spellUuid',
+                'spellUUID',
+                'spell',
+                'spellName',
+                'uuid',
+                'itemId',
+                'actorSpellItemId',
+                'sourceSpellId',
+                'sourceSpellUuid'
+            ]
+            if (explicitSpellKeys.some(key => this.#hasCastEnchantmentEntries(value[key]))) return true
+
+            const snapshot = value.snapshot ?? value.spellSnapshot ?? value.spellData ?? null
+            if (snapshot && this.#hasCastEnchantmentEntries(snapshot.name ?? snapshot.system ?? snapshot)) return true
+
+            return Object.values(value).some(entry => this.#hasCastEnchantmentEntries(entry))
+        }
+
+        /**
+         * Determine whether an item-spellcasting slot is configured enough to expose.
+         * @private
+         * @param {any} slot
+         * @returns {boolean}
+         */
+        #hasConfiguredItemSpellcastingSlot (slot) {
+            if (!slot || typeof slot !== 'object') return false
+            if (slot.enabled === false) return false
+
+            return this.#hasCastEnchantmentEntries([
+                slot.spellId,
+                slot.spellUuid,
+                slot.spellUUID,
+                slot.uuid,
+                slot.itemId,
+                slot.actorSpellItemId,
+                slot.sourceSpellId,
+                slot.sourceSpellUuid,
+                slot.snapshot,
+                slot.spellSnapshot,
+                slot.spellData
+            ])
+        }
+
+        /**
+         * Determine whether an inventory item exposes the system cast-enchantment workflow.
+         * This mirrors the actor-sheet inventory button: a stored spell configuration on the
+         * item is enough; no spell-school or profession rank is required here.
+         * @private
+         * @param {any} itemData
+         * @returns {boolean}
+         */
+        #hasCastEnchantmentConfiguration (itemData) {
+            if (!itemData || itemData.type === 'spell') return false
+
+            const system = itemData.system ?? {}
+            if (system.uiHasCastEnchantment === true || system.hasCastEnchantment === true || system.hasCastEnchantments === true) {
+                return true
+            }
+
+            const moduleFlags = itemData.flags?.['uesrpg-3ev4'] ?? itemData.flags?.uesrpg3ev4 ?? {}
+            const itemSpellcastingSlots = moduleFlags.itemSpellcasting?.slots
+            if (Array.isArray(itemSpellcastingSlots) && itemSpellcastingSlots.some(slot => this.#hasConfiguredItemSpellcastingSlot(slot))) {
+                return true
+            }
+
+            const candidates = [
+                system.castEnchantments,
+                system.castEnchantments?.spells,
+                system.castEnchantments?.spellConfigurations,
+                system.castEnchantments?.configurations,
+                system.spellcastingConfiguration,
+                system.spellcastingConfigurations,
+                system.spellConfigurations,
+                system.enchantment?.castEnchantments,
+                system.enchantment?.spells,
+                system.enchantment?.spellConfigurations,
+                system.enchantment?.spellcastingConfigurations,
+                system.enchantments?.castEnchantments,
+                system.enchantments?.spells,
+                system.enchantments?.spellConfigurations,
+                system.enchantments?.spellcastingConfigurations,
+                moduleFlags.castEnchantments,
+                moduleFlags.spellcastingConfiguration,
+                moduleFlags.spellcastingConfigurations,
+                moduleFlags.spellConfigurations
+            ]
+
+            return candidates.some(candidate => this.#hasCastEnchantmentEntries(candidate))
+        }
+
+        /**
          * Return the first defined value from a list of candidate fields.
          * Preserves explicit zero values.
          * @private
@@ -737,28 +860,19 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
             // Phase 3: apply conservative cache for single-token selection only.
             // - We key by Token id to account for token-local state (status effects/overlays).
-            // - We also check best-effort modifiedTime hints to avoid stale display.
+            // - Invalidation is hook-based only; document `_stats` is not a public Foundry API.
             if (!isPartialBuild && !this.isMultiTokenSelection) {
                 const token = this.token ?? canvas?.tokens?.controlled?.[0] ?? null
                 const cacheKey = token?.id ?? null
                 if (cacheKey) {
                     const cached = getBuildCacheEntry(cacheKey)
                     const actorId = this.actor?.id ?? null
-                    const actorMod = safeModifiedTime(this.actor)
-                    const tokenMod = safeModifiedTime(token?.document)
 
                     if (cached && cached.actorId === actorId) {
-                        // If we have mod-time hints, verify they match.
-                        const actorOk = (cached.actorMod == null || actorMod == null) ? true : cached.actorMod === actorMod
-                        const tokenOk = (cached.tokenMod == null || tokenMod == null) ? true : cached.tokenMod === tokenMod
-                        if (actorOk && tokenOk) {
-                            for (const rec of cached.records ?? []) {
-                                super.addActions(rec.actions, rec.groupData)
-                            }
-                            return
+                        for (const rec of cached.records ?? []) {
+                            super.addActions(rec.actions, rec.groupData)
                         }
-                        // Stale cache - drop it.
-                        invalidateBuildCacheByKey(cacheKey)
+                        return
                     }
                 }
             }
@@ -808,14 +922,10 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 const cacheKey = token?.id ?? null
                 if (cacheKey && Array.isArray(this._uesrpgBuildRecords) && this._uesrpgBuildRecords.length > 0) {
                     const actorId = this.actor?.id ?? null
-                    const actorMod = safeModifiedTime(this.actor)
-                    const tokenMod = safeModifiedTime(token?.document)
 
                     setBuildCacheEntry(cacheKey, {
                         actorId,
                         tokenId: token?.id ?? null,
-                        actorMod,
-                        tokenMod,
                         records: this._uesrpgBuildRecords
                     })
                     // actor->cacheKey indexing is handled by cache.js
@@ -2017,11 +2127,37 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
         }
 
         /**
+         * Build cast-enchantment item actions under the Spells category.
+         * @private
+         */
+        #buildCastEnchantments () {
+            const groupData = { id: GROUP.castEnchantments.id, type: 'system' }
+            const actions = []
+
+            for (const [itemId, itemData] of this.#getAllItemEntries()) {
+                if (!this.#hasCastEnchantmentConfiguration(itemData)) continue
+
+                const description = itemData.system?.description || itemData.system?.flavor || ''
+                actions.push({
+                    id: itemId,
+                    name: itemData.name ?? itemId,
+                    encodedValue: [ACTION_TYPE.castEnchantment, itemId].join(this.delimiter),
+                    img: itemData.img,
+                    tooltip: description
+                })
+            }
+
+            if (actions.length > 0) this.addActions(actions, groupData)
+        }
+
+        /**
          * Build spells grouped by school
          * @private
          */
         async #buildSpells () {
             if (this.#getItemsCount() === 0) return
+
+            this.#buildCastEnchantments()
 
             // Group spells by school
             const spellsBySchool = new Map()

@@ -1,6 +1,6 @@
 import { SystemManager } from './system-manager.js'
 import { MODULE, REQUIRED_CORE_MODULE_VERSION } from './constants.js'
-import { getSystemModulePath, isSupportedActor, debugLog } from './utils.js'
+import { isSupportedActor, debugLog } from './utils.js'
 import {
     invalidateAllBuildCaches,
     invalidateBuildCacheByActorId,
@@ -137,67 +137,6 @@ function resolveTabInsertionContext (utilityControl, hudRoot) {
     return null
 }
 
-function ensureCharacteristicsSubgroup (app, html) {
-    const hudRoot = getHudRoot(app, html)
-    if (!hudRoot) return
-
-    const skillsGroup = hudRoot.querySelector('[data-nest-id="skills"]')
-    if (!skillsGroup) return
-
-    const realCharacteristics = skillsGroup.querySelector('[data-nest-id="skills_characteristics"]')
-    const coreSkills = skillsGroup.querySelector('[data-nest-id="skills_coreSkills"]')
-    if (!coreSkills) return
-
-    const mirroredActions = Array.from(coreSkills.querySelectorAll('[data-part="action"]'))
-        .filter(actionEl => {
-            const btn = actionEl.querySelector('[data-part="actionButton"]')
-            return String(btn?.value ?? '').startsWith('characteristic|')
-        })
-
-    const synthetic = skillsGroup.querySelector('[data-uesrpg-synthetic-subgroup="characteristics"]')
-
-    // If the saved layout already includes the real Characteristics subgroup, remove mirrored fallback copies.
-    if (realCharacteristics) {
-        mirroredActions.forEach(node => node.remove())
-        synthetic?.remove()
-        return
-    }
-
-    if (!mirroredActions.length) {
-        synthetic?.remove()
-        return
-    }
-
-    const listSubgroups = coreSkills.parentElement
-    if (!listSubgroups) return
-
-    let subgroup = synthetic
-    if (!subgroup) {
-        subgroup = document.createElement('div')
-        subgroup.className = 'uesrpg-synthetic-subgroup'
-        subgroup.dataset.uesrpgSyntheticSubgroup = 'characteristics'
-
-        subgroup.innerHTML = `
-            <div class="tah-list-subgroup uesrpg-synthetic-subgroup-body">
-                <div class="tah-list-subgroup-title uesrpg-synthetic-subgroup-title">
-                    <div class="tah-list-subgroup-title-text">${game.i18n.localize('tokenActionHud.uesrpg3ev4.characteristics')}</div>
-                </div>
-                <div class="tah-subgroups uesrpg-synthetic-subgroups">
-                    <div class="tah-actions uesrpg-synthetic-subgroup-actions"></div>
-                </div>
-            </div>
-        `
-    }
-
-    const actionsContainer = subgroup.querySelector('.uesrpg-synthetic-subgroup-actions')
-    if (!actionsContainer) return
-
-    mirroredActions.forEach(node => actionsContainer.appendChild(node))
-    if (subgroup.parentElement !== listSubgroups || subgroup !== coreSkills.previousElementSibling) {
-        listSubgroups.insertBefore(subgroup, coreSkills)
-    }
-}
-
 /**
  * Find the actual insertion container that owns the tab nodes.
  * We climb ancestors until we find an element where the Utility tab node is a direct child
@@ -271,7 +210,7 @@ function makeTrackerNode (utilityNode, label) {
     btn.dataset.uesrpgActionsTracker = 'true'
     btn.dataset.uesrpgActionsTrackerRole = 'control'
     btn.id = 'uesrpg-actions-tracker-tab'
-    btn.setAttribute('aria-label', 'Action tracker')
+    btn.setAttribute('aria-label', game.i18n.localize('tokenActionHud.uesrpg3ev4.actionsTracker'))
 
     // Interactive tracker tab (left click increment, right click decrement).
     // Disabled state (no eligible actor) is handled by the update routine.
@@ -412,7 +351,8 @@ function ensureActionsTrackerTab (app, html) {
         const actor = getEligibleControlledActor()
         const current = actor ? getActorActionCount(actor) : 0
         const max = actor ? getActorActionMax(actor) : DEFAULT_ACTION_TRACKER_MAX
-        const label = `Action ${current}/${max}`
+        const trackerLabel = game.i18n.localize('tokenActionHud.uesrpg3ev4.actionsTracker')
+        const label = `${trackerLabel} ${current}/${max}`
 
         // Check if tracker already exists
         let injected = tabContainer.querySelector?.('#uesrpg-actions-tracker-wrapper')
@@ -475,7 +415,6 @@ function ensureActionsTrackerTab (app, html) {
 Hooks.on('renderTokenActionHud', (app, html) => {
     // Inject once per render; updates are debounced to avoid bursty DOM writes.
     scheduleActionsTrackerUpdate({ ensure: true, app, html, immediate: true })
-    ensureCharacteristicsSubgroup(app, html)
 })
 
 // Some Token Action HUD Core versions emit a "forceUpdate" hook (e.g. when the selected token changes).
@@ -528,7 +467,8 @@ function flushActionsTrackerUpdate (app, html, { ensure = false } = {}) {
     const actor = getEligibleControlledActor()
     const current = actor ? getActorActionCount(actor) : 0
     const max = actor ? getActorActionMax(actor) : DEFAULT_ACTION_TRACKER_MAX
-    const label = `Action ${current}/${max}`
+    const trackerLabel = game.i18n.localize('tokenActionHud.uesrpg3ev4.actionsTracker')
+    const label = `${trackerLabel} ${current}/${max}`
     const actorId = actor?.id ?? null
 
     const btn = getTrackerButtonFromInjected(tracker)
@@ -610,41 +550,23 @@ Hooks.on('updateCombat', (combat, updateData, options, userId) => {
 
 /**
  * Increment attack count helper function
- * Uses the system's AttackTracker if available, otherwise manually increments
+ * Uses the system's public runtime AttackTracker if available.
  * @param {object} attackerActor The attacker actor
  */
 async function incrementAttackCount (attackerActor) {
     if (!attackerActor) return
 
     try {
-        // Try to use the system's AttackTracker first (preferred method)
-        try {
-            const candidatePaths = [
-                getSystemModulePath('src/core/combat/attack-tracker.js'),
-                getSystemModulePath('module/combat/attack-tracker.js')
-            ].filter(Boolean)
-
-            for (const path of candidatePaths) {
-                try {
-                    const { AttackTracker } = await import(path)
-                    if (AttackTracker && typeof AttackTracker.incrementAttacks === 'function') {
-                        await AttackTracker.incrementAttacks(attackerActor)
-                        return
-                    }
-                } catch (_e) {
-                    // Try the next candidate path.
-                }
-            }
-        } catch (importError) {
-            // AttackTracker not available, fall back to manual increment
+        const AttackTracker = game?.uesrpg?.AttackTracker ?? null
+        if (AttackTracker && typeof AttackTracker.incrementAttacks === 'function') {
+            await AttackTracker.incrementAttacks(attackerActor)
+            return
         }
-        
-        // Fallback: manually increment using the correct path
-        // Path confirmed from AttackTracker: system.combat_tracking.attacks_this_round
-        const current = attackerActor.system?.combat_tracking?.attacks_this_round ?? 0
-        await attackerActor.update({
-            'system.combat_tracking.attacks_this_round': current + 1
-        })
+
+        console.warn(`${MODULE.ID} | Unable to increment attack count: game.uesrpg.AttackTracker is unavailable.`)
+        if (game?.settings?.get?.(MODULE.ID, 'strictActionDiagnostics')) {
+            ui.notifications?.warn?.('Unable to increment attack count: system AttackTracker API is unavailable.')
+        }
     } catch (error) {
         console.error(`${MODULE.ID} | Error incrementing attack count`, error)
     }
@@ -730,7 +652,7 @@ function _bindAttackCommitListeners (message, html) {
     }
 }
 
-// Foundry v13/AppV2 hook: native HTMLElement.
+// Foundry v14 chat render hook: native HTMLElement.
 Hooks.on('renderChatMessageHTML', (message, html) => {
     _bindAttackCommitListeners(message, html)
 })

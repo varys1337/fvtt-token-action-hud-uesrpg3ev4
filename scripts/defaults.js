@@ -57,6 +57,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 id: 'spells',
                 name: coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.spells'),
                 groups: [
+                    { ...groups.castEnchantments, nestId: 'spells_castEnchantments' },
                     { ...groups.alterationSpells, nestId: 'spells_alteration' },
                     { ...groups.conjurationSpells, nestId: 'spells_conjuration' },
                     { ...groups.destructionSpells, nestId: 'spells_destruction' },

@@ -15,7 +15,7 @@ export const CORE_MODULE = {
 /**
  * Core module version required by the system module
  */
-export const REQUIRED_CORE_MODULE_VERSION = '2.0'
+export const REQUIRED_CORE_MODULE_VERSION = '2.1.1'
 
 /**
  * Action types
@@ -51,6 +51,7 @@ export const ACTION_TYPE = {
     container: 'tokenActionHud.uesrpg3ev4.container',
     ammunition: 'tokenActionHud.uesrpg3ev4.ammunition',
     scroll: 'tokenActionHud.uesrpg3ev4.scroll',
+    castEnchantment: 'tokenActionHud.uesrpg3ev4.castEnchantment',
     language: 'tokenActionHud.uesrpg3ev4.language',
     faction: 'tokenActionHud.uesrpg3ev4.faction',
     languageEntry: 'tokenActionHud.uesrpg3ev4.languageEntry',
@@ -116,6 +117,7 @@ export const GROUP = {
     scrolls: { id: 'scrolls', name: 'tokenActionHud.uesrpg3ev4.scrolls', type: 'system' },
 
     // Spells by School
+    castEnchantments: { id: 'castEnchantments', name: 'tokenActionHud.uesrpg3ev4.castEnchantments', type: 'system' },
     alterationSpells: { id: 'alterationSpells', name: 'tokenActionHud.uesrpg3ev4.alterationSpells', type: 'system' },
     conjurationSpells: { id: 'conjurationSpells', name: 'tokenActionHud.uesrpg3ev4.conjurationSpells', type: 'system' },
     destructionSpells: { id: 'destructionSpells', name: 'tokenActionHud.uesrpg3ev4.destructionSpells', type: 'system' },

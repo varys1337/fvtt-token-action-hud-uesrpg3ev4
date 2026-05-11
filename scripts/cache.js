@@ -13,13 +13,6 @@ const _actorToCacheKeys = new Map()
 
 let _cacheHooksRegistered = false
 
-export function safeModifiedTime (doc) {
-    // Document stats are not part of the public API, so we treat them as best-effort only.
-    const s = doc?._stats
-    const t = s?.modifiedTime ?? s?.lastModified ?? null
-    return typeof t === 'number' ? t : null
-}
-
 function _unindexCacheKey (key, actorId) {
     if (!actorId) return
     const set = _actorToCacheKeys.get(actorId)

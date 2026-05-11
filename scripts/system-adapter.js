@@ -1,43 +1,5 @@
 import { MODULE } from './constants.js'
-import { getSystemModulePath, diagLog } from './utils.js'
-
-function _systemImportPath (relativePath) {
-    const p = getSystemModulePath(relativePath)
-    if (p) return p
-    const clean = String(relativePath ?? '').replace(/^\/+/, '')
-    return `/systems/uesrpg-3ev4/${clean}`
-}
-
-async function _importFirst (paths = []) {
-    for (const path of paths) {
-        try {
-            return await import(path)
-        } catch (_err) {}
-    }
-    return null
-}
-
-function _makeSyntheticTarget (dataset = {}) {
-    return { dataset: { ...(dataset ?? {}) } }
-}
-
-function _makeSyntheticEvent (target, { shiftKey = false } = {}) {
-    const ev = new MouseEvent('click', {
-        bubbles: true,
-        cancelable: true,
-        view: window,
-        shiftKey: !!shiftKey
-    })
-    Object.defineProperty(ev, 'currentTarget', { writable: false, value: target })
-    return ev
-}
-
-function _resolveToken (actor, explicitToken = null) {
-    if (explicitToken) return explicitToken
-    const controlled = canvas?.tokens?.controlled?.find?.(t => t?.actor?.id === actor?.id) ?? null
-    if (controlled) return controlled
-    return actor?.getActiveTokens?.()?.[0] ?? null
-}
+import { diagLog } from './utils.js'
 
 function _getTokenActionHudApi () {
     return game?.uesrpg?.api?.tokenActionHud ?? null
@@ -46,7 +8,6 @@ function _getTokenActionHudApi () {
 export class SystemAdapter {
     static capabilities = {
         hasRuntimeApi: false,
-        hasPublicBarrel: false,
         lastResolvedAt: null
     }
 
@@ -80,34 +41,8 @@ export class SystemAdapter {
         if (typeof api?.executeCombatQuickAction === 'function') {
             return api.executeCombatQuickAction({ actor, token, payload, shiftKey })
         }
-        SystemAdapter.logDiagnostics('Using transitional fallback', { method: 'executeCombatQuickAction', path: 'src/ui/sheets/shared/listeners/combat-actions.js' })
-
-        const resolvedToken = _resolveToken(actor, token)
-        const dataset = {
-            ...(payload ?? {}),
-            combatAction: payload?.combatAction ?? payload?.action ?? '',
-            action: payload?.action ?? payload?.combatAction ?? ''
-        }
-
-        const target = _makeSyntheticTarget(dataset)
-        const event = _makeSyntheticEvent(target, { shiftKey })
-        const sheet = actor?.sheet ?? { actor, token: resolvedToken, element: null }
-
-        if (sheet && typeof sheet._onCombatQuickAction === 'function') {
-            await sheet._onCombatQuickAction(event, target)
-            return { ok: true, path: 'sheet._onCombatQuickAction' }
-        }
-
-        const mod = await _importFirst([
-            _systemImportPath('src/ui/sheets/shared/listeners/combat-actions.js')
-        ])
-
-        if (typeof mod?.onCombatQuickAction === 'function') {
-            await mod.onCombatQuickAction.call(sheet, event, target)
-            return { ok: true, path: 'shared.listeners.onCombatQuickAction' }
-        }
-
-        return { ok: false, path: 'none', reason: 'no-combat-handler' }
+        SystemAdapter.logDiagnostics('Missing system Token Action HUD API', { method: 'executeCombatQuickAction' })
+        return { ok: false, path: 'none', reason: 'missing-system-api' }
     }
 
     static async executeCastMagic ({ actor, token = null, preselectedSpell = null, shiftKey = false, castActionType = 'primary' } = {}) {
@@ -116,28 +51,50 @@ export class SystemAdapter {
         if (typeof api?.executeCastMagic === 'function') {
             return api.executeCastMagic({ actor, token, preselectedSpell, shiftKey, castActionType })
         }
-        SystemAdapter.logDiagnostics('Using transitional fallback', { method: 'executeCastMagic', path: 'src/ui/sheets/shared/listeners/magic-cast.js' })
+        SystemAdapter.logDiagnostics('Missing system Token Action HUD API', { method: 'executeCastMagic' })
+        return { ok: false, path: 'none', reason: 'missing-system-api' }
+    }
 
-        const resolvedToken = _resolveToken(actor, token)
-        const target = _makeSyntheticTarget({ actionType: castActionType === 'secondary' ? 'secondary' : 'primary' })
-        const event = _makeSyntheticEvent(target, { shiftKey })
-        const sheet = actor?.sheet ?? { actor, token: resolvedToken, element: null }
+    static async executeCastEnchantment ({ actor, token = null, itemId, shiftKey = false } = {}) {
+        if (!actor || !itemId) return { ok: false, path: 'none', reason: 'bad-args' }
 
-        if (sheet && typeof sheet._onCastMagicAction === 'function') {
-            await sheet._onCastMagicAction(event, target, preselectedSpell)
-            return { ok: true, path: 'sheet._onCastMagicAction' }
+        const item = actor.items?.get?.(itemId) ?? null
+        if (!item) return { ok: false, path: 'none', reason: 'missing-item' }
+
+        // Cast Enchantments must mirror the actor sheet inventory button, not the
+        // generic Cast Magic action. The generic Cast Magic path treats stored item
+        // spells as selectable spell sources and opens Spell Options before it reaches
+        // the item-spellcasting runtime. The actor-sheet handler preserves the stored
+        // spellcasting configuration on the item, including Ignore Test / skip test.
+        const sheet = actor.sheet ?? null
+        const handler = sheet?._onCastEnchantmentAction ?? sheet?.onCastEnchantmentAction ?? null
+        if (typeof handler === 'function') {
+            const target = {
+                dataset: { action: 'castEnchantment', itemId: item.id },
+                closest: () => target
+            }
+            const event = {
+                currentTarget: target,
+                target,
+                shiftKey: Boolean(shiftKey),
+                preventDefault: () => {},
+                stopPropagation: () => {}
+            }
+
+            await handler.call(sheet, event, target)
+            return { ok: true, path: 'actor-sheet-cast-enchantment-handler' }
         }
 
-        const mod = await _importFirst([
-            _systemImportPath('src/ui/sheets/shared/listeners/magic-cast.js')
-        ])
-
-        if (typeof mod?.onCastMagicAction === 'function') {
-            await mod.onCastMagicAction.call(sheet, event, target, preselectedSpell)
-            return { ok: true, path: 'shared.listeners.onCastMagicAction' }
+        const api = _getTokenActionHudApi()
+        if (typeof api?.executeCastEnchantment === 'function') {
+            return api.executeCastEnchantment({ actor, token, item, sourceItem: item, itemId: item.id, shiftKey })
+        }
+        if (typeof api?.castEnchantment === 'function') {
+            return api.castEnchantment({ actor, token, item, sourceItem: item, itemId: item.id, shiftKey })
         }
 
-        return { ok: false, path: 'none', reason: 'no-cast-handler' }
+        SystemAdapter.logDiagnostics('Missing system cast-enchantment handler', { method: 'executeCastEnchantment', actorId: actor.id, itemId: item.id })
+        return { ok: false, path: 'none', reason: 'missing-system-api' }
     }
 
     static async executeSkillRoll ({ actor, itemId, shiftKey = false } = {}) {
@@ -146,28 +103,8 @@ export class SystemAdapter {
         if (typeof api?.executeSkillRoll === 'function') {
             return api.executeSkillRoll({ actor, itemId, shiftKey })
         }
-        SystemAdapter.logDiagnostics('Using transitional fallback', { method: 'executeSkillRoll', path: 'src/ui/sheets/shared/listeners/rolls.js' })
-        const target = {
-            dataset: { itemId },
-            closest: () => ({ dataset: { itemId } })
-        }
-        const event = _makeSyntheticEvent(target, { shiftKey })
-        const sheet = actor?.sheet ?? { actor, element: null }
-
-        if (sheet && typeof sheet._onSkillRoll === 'function') {
-            await sheet._onSkillRoll(event, target)
-            return { ok: true, path: 'sheet._onSkillRoll' }
-        }
-
-        const mod = await _importFirst([
-            _systemImportPath('src/ui/sheets/shared/listeners/rolls.js')
-        ])
-        if (typeof mod?.onSkillRoll === 'function') {
-            await mod.onSkillRoll.call(sheet, event, target)
-            return { ok: true, path: 'shared.listeners.onSkillRoll' }
-        }
-
-        return { ok: false, path: 'none', reason: 'no-skill-handler' }
+        SystemAdapter.logDiagnostics('Missing system Token Action HUD API', { method: 'executeSkillRoll' })
+        return { ok: false, path: 'none', reason: 'missing-system-api' }
     }
 
     static async executeCombatRoll ({ actor, itemId, shiftKey = false } = {}) {
@@ -176,28 +113,8 @@ export class SystemAdapter {
         if (typeof api?.executeCombatRoll === 'function') {
             return api.executeCombatRoll({ actor, itemId, shiftKey })
         }
-        SystemAdapter.logDiagnostics('Using transitional fallback', { method: 'executeCombatRoll', path: 'src/ui/sheets/shared/listeners/rolls.js' })
-        const target = {
-            dataset: { itemId },
-            closest: () => ({ dataset: { itemId } })
-        }
-        const event = _makeSyntheticEvent(target, { shiftKey })
-        const sheet = actor?.sheet ?? { actor, element: null }
-
-        if (sheet && typeof sheet._onCombatRoll === 'function') {
-            await sheet._onCombatRoll(event, target)
-            return { ok: true, path: 'sheet._onCombatRoll' }
-        }
-
-        const mod = await _importFirst([
-            _systemImportPath('src/ui/sheets/shared/listeners/rolls.js')
-        ])
-        if (typeof mod?.onCombatRoll === 'function') {
-            await mod.onCombatRoll.call(sheet, event, target)
-            return { ok: true, path: 'shared.listeners.onCombatRoll' }
-        }
-
-        return { ok: false, path: 'none', reason: 'no-combat-roll-handler' }
+        SystemAdapter.logDiagnostics('Missing system Token Action HUD API', { method: 'executeCombatRoll' })
+        return { ok: false, path: 'none', reason: 'missing-system-api' }
     }
 
     static async executeCharacteristicRoll ({ actor, key, label, shiftKey = false } = {}) {
@@ -206,28 +123,18 @@ export class SystemAdapter {
         if (typeof api?.executeCharacteristicRoll === 'function') {
             return api.executeCharacteristicRoll({ actor, key, label, shiftKey })
         }
-        SystemAdapter.logDiagnostics('Using transitional fallback', { method: 'executeCharacteristicRoll', path: 'src/ui/sheets/shared/listeners/characteristics-handlers.js' })
+        SystemAdapter.logDiagnostics('Missing system Token Action HUD API', { method: 'executeCharacteristicRoll' })
+        return { ok: false, path: 'none', reason: 'missing-system-api' }
+    }
 
-        const target = document.createElement('span')
-        target.id = key
-        target.setAttribute('name', label)
-        const event = _makeSyntheticEvent(target, { shiftKey })
-        const sheet = actor?.sheet ?? { actor, element: null }
-
-        if (sheet && typeof sheet._onClickCharacteristic === 'function') {
-            await sheet._onClickCharacteristic(event, target)
-            return { ok: true, path: 'sheet._onClickCharacteristic' }
+    static async executeProfessionRoll ({ actor, professionKey, shiftKey = false } = {}) {
+        if (!actor || !professionKey) return { ok: false, path: 'none', reason: 'bad-args' }
+        const api = _getTokenActionHudApi()
+        if (typeof api?.executeProfessionRoll === 'function') {
+            return api.executeProfessionRoll({ actor, professionKey, shiftKey })
         }
-
-        const mod = await _importFirst([
-            _systemImportPath('src/ui/sheets/shared/listeners/characteristics-handlers.js')
-        ])
-        if (typeof mod?.onClickCharacteristic === 'function') {
-            await mod.onClickCharacteristic.call(sheet, event, target)
-            return { ok: true, path: 'shared.listeners.onClickCharacteristic' }
-        }
-
-        return { ok: false, path: 'none', reason: 'no-characteristic-handler' }
+        SystemAdapter.logDiagnostics('Missing system Token Action HUD API', { method: 'executeProfessionRoll' })
+        return { ok: false, path: 'none', reason: 'missing-system-api' }
     }
 
     static async executeFeatureActivation ({ item, actor, event = null } = {}) {
@@ -236,42 +143,8 @@ export class SystemAdapter {
         if (typeof api?.executeFeatureActivation === 'function') {
             return api.executeFeatureActivation({ item, actor, event })
         }
-        SystemAdapter.logDiagnostics('Using transitional fallback', { method: 'executeFeatureActivation', path: 'src/ui/sheets/shared-handlers.js' })
-
-        const mod = await _importFirst([
-            _systemImportPath('src/ui/sheets/shared-handlers.js')
-        ])
-
-        if (item.type === 'talent' && typeof mod?.activateTalentFromItemSheet === 'function') {
-            await mod.activateTalentFromItemSheet({ item, event })
-            return { ok: true, path: 'shared-handlers.activateTalentFromItemSheet' }
-        }
-        if (item.type === 'power' && typeof mod?.activatePowerFromItemSheet === 'function') {
-            await mod.activatePowerFromItemSheet({ item, event })
-            return { ok: true, path: 'shared-handlers.activatePowerFromItemSheet' }
-        }
-        if (item.type === 'trait' && typeof mod?.activateTraitFromItemSheet === 'function') {
-            await mod.activateTraitFromItemSheet({ item, event })
-            return { ok: true, path: 'shared-handlers.activateTraitFromItemSheet' }
-        }
-
-        const activationMod = await _importFirst([
-            _systemImportPath('src/core/system/activation/activation-executor.js')
-        ])
-
-        if (typeof activationMod?.executeItemActivation === 'function') {
-            await activationMod.executeItemActivation({
-                item,
-                actor: actor ?? item.actor ?? null,
-                event,
-                renderChat: true,
-                includeImage: true,
-                context: {}
-            })
-            return { ok: true, path: 'activation-executor.executeItemActivation' }
-        }
-
-        return { ok: false, path: 'none', reason: 'no-feature-activation-handler' }
+        SystemAdapter.logDiagnostics('Missing system Token Action HUD API', { method: 'executeFeatureActivation' })
+        return { ok: false, path: 'none', reason: 'missing-system-api' }
     }
 
     static async executeScrollCast ({ actor, scrollItem, castActionType = 'primary' } = {}) {
@@ -280,22 +153,8 @@ export class SystemAdapter {
         if (typeof api?.executeScrollCast === 'function') {
             return api.executeScrollCast({ actor, scrollItem, castActionType })
         }
-        SystemAdapter.logDiagnostics('Using transitional fallback', { method: 'executeScrollCast', path: 'src/core/magic/scroll-casting.js' })
-
-        const mod = await _importFirst([
-            _systemImportPath('src/core/magic/scroll-casting.js')
-        ])
-
-        if (typeof mod?.castScrollFromItem === 'function') {
-            const result = await mod.castScrollFromItem({
-                scrollItem,
-                casterActor: actor,
-                castActionType
-            })
-            return { ok: true, path: 'scroll-casting.castScrollFromItem', result }
-        }
-
-        return { ok: false, path: 'none', reason: 'no-scroll-cast-handler' }
+        SystemAdapter.logDiagnostics('Missing system Token Action HUD API', { method: 'executeScrollCast' })
+        return { ok: false, path: 'none', reason: 'missing-system-api' }
     }
 
     static async openResourceDialog ({ actor, resourceId } = {}) {
@@ -304,42 +163,8 @@ export class SystemAdapter {
         if (typeof api?.openResourceDialog === 'function') {
             return api.openResourceDialog({ actor, resourceId })
         }
-        SystemAdapter.logDiagnostics('Using transitional fallback', { method: 'openResourceDialog', path: resourceId })
-
-        if (resourceId === 'resource-health') {
-            const mod = await _importFirst([_systemImportPath('src/ui/apps/hp-temp-hp-dialog.js')])
-            if (mod?.HPTempHPDialog?.show) {
-                await mod.HPTempHPDialog.show(actor)
-                return { ok: true, path: 'HPTempHPDialog.show' }
-            }
-        }
-
-        if (resourceId === 'resource-stamina') {
-            const mod = await _importFirst([_systemImportPath('src/core/stamina/stamina-dialog.js')])
-            if (typeof mod?.openStaminaDialog === 'function') {
-                await mod.openStaminaDialog(actor)
-                return { ok: true, path: 'openStaminaDialog' }
-            }
-        }
-
-        if (resourceId === 'resource-magicka') {
-            const mod = await _importFirst([_systemImportPath('src/ui/apps/magicka-barrier-dialog.js')])
-            if (mod?.MagickaBarrierDialog?.show) {
-                await mod.MagickaBarrierDialog.show(actor)
-                return { ok: true, path: 'MagickaBarrierDialog.show' }
-            }
-        }
-
-        if (resourceId === 'resource-luck') {
-            const mod = await _importFirst([_systemImportPath('src/core/luck/luck-workflow.js')])
-            const fn = mod?.openBurnLuckFromSheet ?? mod?.LuckAPI?.openBurnLuckFromSheet ?? mod?.LuckAPI?.openBurnDialog
-            if (typeof fn === 'function') {
-                await fn(actor)
-                return { ok: true, path: 'luck.openBurnLuckFromSheet' }
-            }
-        }
-
-        return { ok: false, path: 'none', reason: 'no-resource-dialog-handler' }
+        SystemAdapter.logDiagnostics('Missing system Token Action HUD API', { method: 'openResourceDialog' })
+        return { ok: false, path: 'none', reason: 'missing-system-api' }
     }
 
     static async applyRest ({ actor, restType } = {}) {
@@ -348,24 +173,8 @@ export class SystemAdapter {
         if (typeof api?.applyRest === 'function') {
             return api.applyRest({ actor, restType })
         }
-        SystemAdapter.logDiagnostics('Using transitional fallback', { method: 'applyRest', path: 'src/ui/sheets/rest-workflow.js' })
-
-        const mod = await _importFirst([_systemImportPath('src/ui/sheets/rest-workflow.js')])
-        if (!mod) return { ok: false, path: 'none', reason: 'no-rest-module' }
-
-        const fn = restType === 'shortRest' ? mod.applyShortRest : mod.applyLongRest
-        if (typeof fn !== 'function') return { ok: false, path: 'none', reason: 'no-rest-function' }
-
-        const { line } = await fn(actor)
-        if (line && typeof mod.buildRestChatContent === 'function') {
-            await ChatMessage.create({
-                user: game.user.id,
-                speaker: ChatMessage.getSpeaker({ actor }),
-                content: mod.buildRestChatContent(restType === 'shortRest' ? 'Short Rest' : 'Long Rest', [line])
-            })
-        }
-
-        return { ok: true, path: `rest-workflow.${restType}` }
+        SystemAdapter.logDiagnostics('Missing system Token Action HUD API', { method: 'applyRest' })
+        return { ok: false, path: 'none', reason: 'missing-system-api' }
     }
 
     static async openSocialSelector ({ actor, kind, entryId = null } = {}) {
@@ -374,17 +183,8 @@ export class SystemAdapter {
         if (typeof api?.openSocialSelector === 'function') {
             return api.openSocialSelector({ actor, kind, entryId })
         }
-        SystemAdapter.logDiagnostics('Using transitional fallback', { method: 'openSocialSelector', path: 'src/ui/apps/v2/social-selectors.js' })
-        const mod = await _importFirst([_systemImportPath('src/ui/apps/v2/social-selectors.js')])
-        if (kind === 'language' && mod?.LanguageSelectorAppV2?.prompt) {
-            await mod.LanguageSelectorAppV2.prompt(actor)
-            return { ok: true, path: 'LanguageSelectorAppV2.prompt', entryId, focusedOpenSupported: false }
-        }
-        if (kind === 'faction' && mod?.FactionSelectorAppV2?.prompt) {
-            await mod.FactionSelectorAppV2.prompt(actor)
-            return { ok: true, path: 'FactionSelectorAppV2.prompt', entryId, focusedOpenSupported: false }
-        }
-        return { ok: false, path: 'none', reason: 'no-social-selector' }
+        SystemAdapter.logDiagnostics('Missing system Token Action HUD API', { method: 'openSocialSelector' })
+        return { ok: false, path: 'none', reason: 'missing-system-api' }
     }
 
     static async getSpecialActionDefinition (id) {
@@ -392,11 +192,7 @@ export class SystemAdapter {
         if (typeof api?.getSpecialActionDefinition === 'function') {
             return api.getSpecialActionDefinition(id)
         }
-        SystemAdapter.logDiagnostics('Using transitional fallback', { method: 'getSpecialActionDefinition', path: 'src/core/combat/combat-style-utils.js' })
-        const mod = await _importFirst([_systemImportPath('src/core/combat/combat-style-utils.js')])
-        if (typeof mod?.getSpecialActionById === 'function') {
-            return mod.getSpecialActionById(id)
-        }
+        SystemAdapter.logDiagnostics('Missing system Token Action HUD API', { method: 'getSpecialActionDefinition' })
         return null
     }
 
@@ -405,11 +201,7 @@ export class SystemAdapter {
         if (typeof api?.buildSpecialActionsForActor === 'function') {
             return api.buildSpecialActionsForActor(actor)
         }
-        SystemAdapter.logDiagnostics('Using transitional fallback', { method: 'buildSpecialActionsForActor', path: 'src/core/combat/combat-style-utils.js' })
-        const mod = await _importFirst([_systemImportPath('src/core/combat/combat-style-utils.js')])
-        if (typeof mod?.buildSpecialActionsForActor === 'function') {
-            return mod.buildSpecialActionsForActor(actor) ?? []
-        }
+        SystemAdapter.logDiagnostics('Missing system Token Action HUD API', { method: 'buildSpecialActionsForActor' })
         return []
     }
 
@@ -419,15 +211,8 @@ export class SystemAdapter {
         if (typeof api?.setItemEquipped === 'function') {
             return api.setItemEquipped({ item, equipped })
         }
-        SystemAdapter.logDiagnostics('Using transitional fallback', { method: 'setItemEquipped', path: 'item.update.system.equipped' })
-
-        const desired = Boolean(equipped)
-        if (typeof item.update === 'function') {
-            await item.update({ 'system.equipped': desired })
-            return { ok: true, path: 'item.update.system.equipped' }
-        }
-
-        return { ok: false, path: 'none', reason: 'no-item-update' }
+        SystemAdapter.logDiagnostics('Missing system Token Action HUD API', { method: 'setItemEquipped' })
+        return { ok: false, path: 'none', reason: 'missing-system-api' }
     }
 
     static async openDocumentSheet ({ document } = {}) {
@@ -435,11 +220,8 @@ export class SystemAdapter {
         if (typeof api?.openDocumentSheet === 'function') {
             return api.openDocumentSheet({ document })
         }
-        if (!document?.sheet || typeof document.sheet.render !== 'function') {
-            return { ok: false, path: 'none', reason: 'no-sheet' }
-        }
-        document.sheet.render(true)
-        return { ok: true, path: 'document.sheet.render' }
+        SystemAdapter.logDiagnostics('Missing system Token Action HUD API', { method: 'openDocumentSheet' })
+        return { ok: false, path: 'none', reason: 'missing-system-api' }
     }
 
     static async runFeaturePostChatAutomation ({ item, actor = null, event = null } = {}) {
@@ -448,22 +230,8 @@ export class SystemAdapter {
         if (typeof api?.runFeaturePostChatAutomation === 'function') {
             return api.runFeaturePostChatAutomation({ item, actor, event })
         }
-        SystemAdapter.logDiagnostics('Using transitional fallback', { method: 'runFeaturePostChatAutomation', path: 'src/core/system/activation/activation-executor.js' })
-        const activationMod = await _importFirst([
-            _systemImportPath('src/core/system/activation/activation-executor.js')
-        ])
-        if (typeof activationMod?.executeItemActivation === 'function') {
-            await activationMod.executeItemActivation({
-                item,
-                actor: actor ?? item.actor ?? null,
-                event,
-                renderChat: false,
-                includeImage: false,
-                context: {}
-            })
-            return { ok: true, path: 'activation-executor.executeItemActivation.renderChatFalse' }
-        }
-        return { ok: false, path: 'none', reason: 'no-feature-post-chat-handler' }
+        SystemAdapter.logDiagnostics('Missing system Token Action HUD API', { method: 'runFeaturePostChatAutomation' })
+        return { ok: false, path: 'none', reason: 'missing-system-api' }
     }
 }
 

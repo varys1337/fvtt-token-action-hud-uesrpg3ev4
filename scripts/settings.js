@@ -6,18 +6,6 @@ import { MODULE } from './constants.js'
  * @param {function} coreUpdate Token Action HUD Core update function
  */
 export function register (coreUpdate) {
-    game.settings.register(MODULE.ID, 'displayUnequipped', {
-        name: game.i18n.localize('tokenActionHud.uesrpg3ev4.settings.displayUnequipped.name'),
-        hint: game.i18n.localize('tokenActionHud.uesrpg3ev4.settings.displayUnequipped.hint'),
-        scope: 'client',
-        config: true,
-        type: Boolean,
-        default: false,
-        onChange: (value) => {
-            coreUpdate(value)
-        }
-    })
-
     game.settings.register(MODULE.ID, 'passiveFeatureRightClick', {
         name: game.i18n.localize('tokenActionHud.uesrpg3ev4.settings.passiveFeatureRightClick.name'),
         hint: game.i18n.localize('tokenActionHud.uesrpg3ev4.settings.passiveFeatureRightClick.hint'),

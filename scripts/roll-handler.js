@@ -395,6 +395,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             case 'castMagic':
                 await this.#handleCastMagicAction(event, actor, actionId)
                 break
+            case 'castEnchantment':
+                await this.#handleCastEnchantmentAction(event, actor, actionId)
+                break
             case 'dash':
                 await this.#handleDashAction(event, actor)
                 break
@@ -1016,53 +1019,19 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 return
             }
 
-            // Left-click: Call the system's profession roll handler.
-            // The modern NPC professions handler (NpcSheetV2._onProfessionsRoll) resolves the
-            // profession key via DOM traversal (closest("[data-profession-key]"), ".item", etc.)
-            // OR via heuristic parsing of the passed action object.
-            // Token Action HUD uses synthetic events, so we emulate both patterns.
-            const fakeTarget = {
-                ...this.#makeSyntheticTarget({
-                    professionKey: profKey,
-                    actionId: profKey,
-                    id: profKey,
-                    itemId: profKey
-                }),
-                // Heuristic resolver checks these properties directly.
+            // Left-click: delegate to the system-owned Token Action HUD API. The system wrapper
+            // owns any AppV2/sheet compatibility needed to reach the canonical profession roll.
+            const res = await SystemAdapter.executeProfessionRoll({
+                actor,
                 professionKey: profKey,
-                id: profKey,
-                actionId: profKey,
-                // DOM resolver uses .closest(...) chains; emulate the key selectors it checks.
-                closest: (selector) => {
-                    const sel = String(selector ?? '')
-                    if (!sel) return null
-                    if (sel.includes('[data-profession-key]') || sel.includes('.profession-roll-target') || sel.includes('.item') || sel.includes('.npc-item')) {
-                        return { dataset: { professionKey: profKey, itemId: profKey } }
-                    }
-                    return null
-                }
-            }
-
-            const fakeEvent = new MouseEvent('click', {
-                bubbles: true,
-                cancelable: true,
-                view: window,
                 shiftKey: event?.shiftKey || false
             })
-
-            // Provide both currentTarget and target for maximum compatibility.
-            Object.defineProperty(fakeEvent, 'currentTarget', { writable: false, value: fakeTarget })
-            Object.defineProperty(fakeEvent, 'target', { writable: false, value: fakeTarget })
-
-            const sheet = actor.sheet
-            if (sheet && typeof sheet._onProfessionsRoll === 'function') {
-                await sheet._onProfessionsRoll(fakeEvent, fakeTarget)
-                return
-            }
+            if (res?.ok) return
 
             this.#notifyDispatchIssue('No profession roll handler is available.', {
                 actorId: actor?.id,
-                professionKey: profKey
+                professionKey: profKey,
+                adapterPath: res?.path ?? 'none'
             })
         }
 
@@ -1199,7 +1168,15 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
             // Left-click: toggle equipped status
             const equipped = weapon.system?.equipped || false
-            await SystemAdapter.setItemEquipped({ item: weapon, equipped: !equipped })
+            const res = await SystemAdapter.setItemEquipped({ item: weapon, equipped: !equipped })
+            if (!res?.ok) {
+                this.#notifyDispatchIssue('Unable to update item equipped state.', {
+                    actorId: actor?.id,
+                    itemId: actionId,
+                    adapterPath: res?.path ?? 'none'
+                })
+                return
+            }
 
             ui.notifications.info(`${weapon.name} ${!equipped ? 'equipped' : 'unequipped'}`)
         }
@@ -1221,7 +1198,15 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
             // Toggle equipped status
             const equipped = armor.system?.equipped || false
-            await SystemAdapter.setItemEquipped({ item: armor, equipped: !equipped })
+            const res = await SystemAdapter.setItemEquipped({ item: armor, equipped: !equipped })
+            if (!res?.ok) {
+                this.#notifyDispatchIssue('Unable to update item equipped state.', {
+                    actorId: actor?.id,
+                    itemId: actionId,
+                    adapterPath: res?.path ?? 'none'
+                })
+                return
+            }
 
             ui.notifications.info(`${armor.name} ${!equipped ? 'equipped' : 'unequipped'}`)
         }
@@ -1242,7 +1227,15 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             }
 
             const equipped = shield.system?.equipped || false
-            await SystemAdapter.setItemEquipped({ item: shield, equipped: !equipped })
+            const res = await SystemAdapter.setItemEquipped({ item: shield, equipped: !equipped })
+            if (!res?.ok) {
+                this.#notifyDispatchIssue('Unable to update item equipped state.', {
+                    actorId: actor?.id,
+                    itemId: actionId,
+                    adapterPath: res?.path ?? 'none'
+                })
+                return
+            }
 
             ui.notifications.info(`${shield.name} ${!equipped ? 'equipped' : 'unequipped'}`)
         }
@@ -1266,7 +1259,15 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             // Left-click: toggle equipped if item has equipped property, otherwise open sheet
             if (Object.prototype.hasOwnProperty.call(item.system || {}, 'equipped')) {
                 const equipped = item.system.equipped || false
-                await SystemAdapter.setItemEquipped({ item, equipped: !equipped })
+                const res = await SystemAdapter.setItemEquipped({ item, equipped: !equipped })
+                if (!res?.ok) {
+                    this.#notifyDispatchIssue('Unable to update item equipped state.', {
+                        actorId: actor?.id,
+                        itemId: actionId,
+                        adapterPath: res?.path ?? 'none'
+                    })
+                    return
+                }
                 ui.notifications.info(`${item.name} ${!equipped ? 'equipped' : 'unequipped'}`)
             } else {
                 // No equipped property, just open sheet
@@ -1308,7 +1309,15 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             // Left-click: toggle equipped if item has equipped property, otherwise open sheet
             if (Object.prototype.hasOwnProperty.call(ammo.system || {}, 'equipped')) {
                 const equipped = ammo.system.equipped || false
-                await SystemAdapter.setItemEquipped({ item: ammo, equipped: !equipped })
+                const res = await SystemAdapter.setItemEquipped({ item: ammo, equipped: !equipped })
+                if (!res?.ok) {
+                    this.#notifyDispatchIssue('Unable to update item equipped state.', {
+                        actorId: actor?.id,
+                        itemId: actionId,
+                        adapterPath: res?.path ?? 'none'
+                    })
+                    return
+                }
                 ui.notifications.info(`${ammo.name} ${!equipped ? 'equipped' : 'unequipped'}`)
             } else {
                 // No equipped property, just open sheet
@@ -1340,6 +1349,42 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 console.error(`${MODULE.ID} | Error casting spell`, error)
                 // Fallback to opening spell sheet
                 spell.sheet.render(true)
+            }
+        }
+
+        /**
+         * Handle cast-enchantment item action.
+         * @private
+         * @param {object} event
+         * @param {object} actor
+         * @param {string} actionId
+         */
+        async #handleCastEnchantmentAction (event, actor, actionId) {
+            const item = actor.items.get(actionId)
+            if (!item) {
+                this.#notifyDispatchIssue('Cast-enchantment item was not found on the actor.', {
+                    actorId: actor?.id,
+                    itemId: actionId
+                })
+                return
+            }
+
+            const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
+            const res = await SystemAdapter.executeCastEnchantment({
+                actor,
+                token,
+                itemId: item.id,
+                shiftKey: event?.shiftKey
+            })
+
+            if (!res?.ok) {
+                this.#notifyDispatchIssue('Unable to cast enchantment from HUD.', {
+                    actorId: actor?.id,
+                    itemId: item.id,
+                    adapterPath: res?.path ?? 'none',
+                    reason: res?.reason ?? null
+                })
+                item.sheet?.render?.(true)
             }
         }
 
@@ -1516,7 +1561,14 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             // HUD activation behaves identically to the item-sheet "Activate" button.
             try {
                 const res = await SystemAdapter.executeFeatureActivation({ item: feature, actor, event })
-                if (!res?.ok) await this.#postFeatureDescriptionToChat(feature, actor, event)
+                if (!res?.ok) {
+                    this.#notifyDispatchIssue('No feature activation handler is available; posting description only.', {
+                        actorId: actor?.id,
+                        itemId: actionId,
+                        adapterPath: res?.path ?? 'none'
+                    })
+                    await this.#postFeatureDescriptionToChat(feature, actor, event)
+                }
             } catch (err) {
                 console.error(`${MODULE.ID} | Feature activation failed`, err)
                 ui.notifications.error('Failed to activate feature. See console for details.')
@@ -1548,7 +1600,14 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 content
             })
 
-            await SystemAdapter.runFeaturePostChatAutomation({ item: feature, actor, event })
+            const res = await SystemAdapter.runFeaturePostChatAutomation({ item: feature, actor, event })
+            if (!res?.ok) {
+                this.#notifyDispatchIssue('No feature post-chat automation handler is available.', {
+                    actorId: actor?.id,
+                    itemId: feature?.id ?? null,
+                    adapterPath: res?.path ?? 'none'
+                })
+            }
         }
 
         /**

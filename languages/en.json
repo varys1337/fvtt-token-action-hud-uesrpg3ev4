@@ -46,6 +46,7 @@
       "containers": "Containers",
       "ammunition": "Ammunition",
       "scrolls": "Scrolls",
+      "castEnchantments": "Cast Enchantments",
       "languages": "Languages",
       "factions": "Factions",
       "alterationSpells": "Alteration Spells",
@@ -87,6 +88,7 @@
       "container": "Container",
       "spell": "Spell",
       "scroll": "Scroll",
+      "castEnchantment": "Cast Enchantment",
       "talent": "Talent",
       "trait": "Trait",
       "power": "Power",
@@ -95,10 +97,6 @@
       "manageLanguages": "Manage Languages",
       "manageFactions": "Manage Factions",
       "settings": {
-        "displayUnequipped": {
-          "hint": "Display unequipped weapons and armor in the HUD",
-          "name": "Display Unequipped Items"
-        },
         "passiveFeatureRightClick": {
           "name": "Passive feature right-click",
           "hint": "Choose what right-click does for passive Talents/Traits/Powers. Left-click always activates features.",
@@ -115,7 +113,7 @@
             "intersection": "Intersection",
             "union": "Union"
           }
-	        },
+        },
         "debug": {
           "name": "Debug logging",
           "hint": "Enable debug and diagnostics logging for this Token Action HUD system module."
