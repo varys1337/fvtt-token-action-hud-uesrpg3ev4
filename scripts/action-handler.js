@@ -1,52 +1,16 @@
 // System Module Imports
-import { ACTION_TYPE, GROUP, MODULE, SPELL_SCHOOLS } from './constants.js'
-import { isSupportedActor, isSupportedActorType, debugLog, diagLog } from './utils.js'
-import {
-    getBuildCacheEntry,
-    invalidateBuildCacheByActorId,
-    invalidateBuildCacheByKey,
-    registerBuildCacheInvalidationHooks,
-    setBuildCacheEntry
-} from './cache.js'
+import { GROUP, MODULE, SPELL_SCHOOLS } from './constants.js'
+import { isSupportedActor, debugLog, diagLog, escapeText, resolveActorToken, getStatusEffectConfigs, readAttackTrackerView } from './utils.js'
 import { runBuildExtensions } from './extensions.js'
-import { executeCombatQuickActionForActor } from './dispatch.js'
 import { SystemAdapter } from './system-adapter.js'
 
 export let ActionHandler = null
-
-// Phase 4: keep cache lifecycle in a dedicated module for clarity.
-registerBuildCacheInvalidationHooks()
 
 Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
     /**
      * Extends Token Action HUD Core's ActionHandler class and builds system-defined actions for the HUD
      */
     ActionHandler = class ActionHandler extends coreModule.api.ActionHandler {
-        constructor (...args) {
-            super(...args)
-            /** @type {Array<{groupData: object, actions: object[]}>} */
-            this._uesrpgBuildRecords = []
-        }
-
-        /**
-         * Override addActions to also capture records for conservative caching.
-         * @override
-         */
-        addActions (actions, groupData) {
-            super.addActions(actions, groupData)
-            try {
-                if (!Array.isArray(actions) || !groupData?.id) return
-                // Deep-clone actions to avoid later mutation by Core.
-                const clone = foundry?.utils?.deepClone
-                    ? foundry.utils.deepClone(actions)
-                    : JSON.parse(JSON.stringify(actions))
-                const gd = { ...groupData }
-                this._uesrpgBuildRecords.push({ groupData: gd, actions: clone })
-            } catch (e) {
-                // Cache capture is best-effort. Never block HUD building.
-            }
-        }
-
         /**
          * Map system activation action types to stable sort weights.
          * Lower weight sorts first.
@@ -130,23 +94,29 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @returns {string}
          */
         #getActivationUsesText (activation = {}) {
-            const uses = activation?.uses
-            const usage = activation?.usage
-
-            // Prefer the modern 'uses' schema if present.
-            if (uses && (Number(uses?.max ?? 0) > 0 || Number(uses?.value ?? 0) > 0)) {
-                const value = Number(uses?.value ?? 0)
-                const max = Number(uses?.max ?? 0)
-                return `${value}/${max}`
+            const usage = activation.usage
+            const uses = activation.uses
+            const meaningful = (data, valueKey, periodKey) => {
+                const period = String(data?.[periodKey] ?? '').trim().toLowerCase()
+                return Number(data?.max ?? 0) > 0 || Number(data?.[valueKey] ?? 0) > 0 || (period !== '' && period !== 'none')
             }
+            const modern = meaningful(usage, 'current', 'period')
+            if (!modern && !meaningful(uses, 'value', 'reset')) return ''
+            const source = modern ? usage : uses
+            const value = Number(source?.[modern ? 'current' : 'value'] ?? 0)
+            const max = source?.max == null ? null : Number(source.max)
+            const period = String(source?.[modern ? 'period' : 'reset'] ?? '').trim()
+            if (!Number.isFinite(value)) return ''
+            if (Number.isFinite(max) && max > 0) return `${value}/${max}`
+            return period && period.toLowerCase() !== 'none' ? `${value} (${period})` : String(value)
+        }
 
-            if (usage && (Number(usage?.max ?? 0) > 0 || Number(usage?.current ?? 0) > 0)) {
-                const value = Number(usage?.current ?? 0)
-                const max = Number(usage?.max ?? 0)
-                return `${value}/${max}`
-            }
-
-            return ''
+        /**
+         * Core escapes visible badge text; tooltip titles also need HTML escaping.
+         * @private
+         */
+        #textInfo (text) {
+            return { text, title: escapeText(text) }
         }
 
         /**
@@ -154,10 +124,16 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @private
          * @returns {string}
          */
-        #getAttacksThisRoundText () {
-            const currentAttacks = Number(this.actor?.system?.combat_tracking?.attacks_this_round ?? 0)
-            const maxAttacks = 2
-            return `${currentAttacks}/${maxAttacks}`
+        #getAttacksThisRoundText (limitContext = {}) {
+            if (!this.actor || this.isMultiTokenSelection) return ''
+            const token = resolveActorToken(this.actor, this.token)
+            const key = `${token?.document?.uuid ?? ''}:${limitContext.attackMode ?? ''}:${limitContext.weaponId ?? ''}`
+            if (!this._attackTrackerViews.has(key)) {
+                const state = readAttackTrackerView(this.actor, token, limitContext)
+                const text = state ? `${state.current}/${state.max === Number.MAX_SAFE_INTEGER ? '∞' : state.max}` : ''
+                this._attackTrackerViews.set(key, text)
+            }
+            return this._attackTrackerViews.get(key)
         }
 
         /**
@@ -166,9 +142,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {string} label
          * @returns {string}
          */
-        #withAttackTracker (label) {
-            const t = this.#getAttacksThisRoundText()
-            return `${label} ${t}`
+        #withAttackTracker (label, limitContext = {}) {
+            const text = this.#getAttacksThisRoundText(limitContext)
+            return text ? `${label} ${text}` : label
         }
 
         /**
@@ -235,7 +211,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const costText = this.#getActivationCostText(activation?.costs)
             const usesText = this.#getActivationUsesText(activation)
 
-            const title = enabled ? `Activated (${typeLabel.toLowerCase()})` : 'Passive'
+            const automated = itemData?.flags?.['uesrpg-3ev4']?.featureConfig?.enabled === true
+            const title = enabled ? `Activated (${typeLabel.toLowerCase()})` : (automated ? game.i18n.localize('tokenActionHud.uesrpg3ev4.systemManagedFeature') : 'Passive')
             const metaParts = []
             if (enabled) {
                 if (costText) metaParts.push(costText)
@@ -243,7 +220,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             }
 
             const metaLine = metaParts.length
-                ? `<div class="uesrpg-tah-tooltip-meta">${metaParts.join(' • ')}</div>`
+                ? `<div class="uesrpg-tah-tooltip-meta">${metaParts.map(escapeText).join(' • ')}</div>`
                 : ''
 
             // Tooltips must be readable in both Foundry light/dark themes. Item descriptions may contain
@@ -256,7 +233,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
             return `
                 <div class="uesrpg-tah-tooltip">
-                    <div class="uesrpg-tah-tooltip-title">${title}</div>
+                    <div class="uesrpg-tah-tooltip-title">${escapeText(title)}</div>
                     ${metaLine}
                     <hr class="uesrpg-tah-tooltip-sep" />
                     ${descLine}
@@ -276,8 +253,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             if (!raw.trim()) return ''
 
             try {
-                const div = document.createElement('div')
-                div.innerHTML = raw
+                const template = document.createElement('template')
+                template.innerHTML = raw
+                const div = template.content
 
                 // Replace <br> with newlines to preserve author intent.
                 div.querySelectorAll('br').forEach(br => br.replaceWith('\n'))
@@ -293,17 +271,14 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 const text = (div.textContent ?? '').replace(/\r\n/g, '\n')
                 const normalized = text
                     .split('\n')
-                    .map(l => l.trim())
+                    .map(l => escapeText(l.trim()))
                     .filter(Boolean)
                     .join('<br>')
 
                 return normalized
             } catch (_err) {
                 // Fallback: best-effort strip tags.
-                return raw
-                    .replace(/<[^>]*>/g, ' ')
-                    .replace(/\s+/g, ' ')
-                    .trim()
+                return escapeText(raw.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim())
             }
         }
 
@@ -327,15 +302,15 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const action = {
                 id: itemId,
                 name: itemData?.name ?? 'Feature',
-                encodedValue: [encodedType, itemId].join(this.delimiter),
+                system: { actionTypeId: encodedType, actionId: itemId },
                 tooltip: this.#buildFeatureTooltip(itemData, activation),
                 cssClass: isActivated ? 'active' : ''
             }
 
             if (isActivated) {
-                action.info1 = { text: typeLabel }
-                if (costText) action.info2 = { text: costText }
-                if (usesText) action.info3 = { text: usesText }
+                action.info1 = this.#textInfo(typeLabel)
+                if (costText) action.info2 = this.#textInfo(costText)
+                if (usesText) action.info3 = this.#textInfo(usesText)
             }
 
             return {
@@ -363,16 +338,14 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          */
         #getItemsIterator () {
             if (!this.items) return []
-            // If it's a Collection (has .entries method), use entries
+            // Arrays also expose entries(); normalize their document IDs first.
+            if (Array.isArray(this.items)) {
+                return this.items.filter(Boolean).map(item => [item.id ?? item._id, item])
+            }
             if (typeof this.items.entries === 'function') {
                 return this.items.entries()
             }
-            // If it's an Array, convert to [id, item] pairs
-            if (Array.isArray(this.items)) {
-                return this.items.map(item => [item.id || item._id, item])
-            }
-            // Fallback: try to iterate as-is
-            return this.items
+            return typeof this.items[Symbol.iterator] === 'function' ? this.items : []
         }
 
 
@@ -655,8 +628,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             if (hasSpeak || hasReadWrite) {
                 const spoken = hasSpeak ? (entry.speak ? 'Spoken' : 'Silent') : ''
                 const written = hasReadWrite ? (entry.readWrite ? 'Written' : 'Oral') : ''
-                if (spoken) info.info1 = { text: spoken }
-                if (written) info.info2 = { text: written }
+                if (spoken) info.info1 = this.#textInfo(spoken)
+                if (written) info.info2 = this.#textInfo(written)
             }
             return info
         }
@@ -672,9 +645,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const rankTitle = String(entry?.rankTitle ?? entry?.rank ?? entry?.standing ?? '').trim()
             const location = String(entry?.location ?? '').trim()
             const reputation = String(entry?.reputation ?? entry?.disposition ?? entry?.influence ?? '').trim()
-            if (rankTitle) info.info1 = { text: rankTitle }
-            else if (reputation) info.info1 = { text: reputation }
-            if (location) info.info2 = { text: location }
+            if (rankTitle) info.info1 = this.#textInfo(rankTitle)
+            else if (reputation) info.info1 = this.#textInfo(reputation)
+            if (location) info.info2 = this.#textInfo(location)
             return info
         }
 
@@ -752,13 +725,13 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
         #buildWeaponAttackMetadata (weapon) {
             const data = {}
             const damage = String(weapon?.system?.damage ?? '').trim()
-            if (damage) data.info1 = { text: damage }
+            if (damage) data.info1 = this.#textInfo(damage)
 
             const charge = weapon?.system?.charge
             const chargeText = (charge && (Number(charge?.max ?? 0) > 0 || Number(charge?.value ?? 0) > 0))
                 ? `C ${Number(charge?.value ?? 0)}/${Number(charge?.max ?? 0)}`
                 : ''
-            if (chargeText) data.info2 = { text: chargeText }
+            if (chargeText) data.info2 = this.#textInfo(chargeText)
 
             return data
         }
@@ -791,146 +764,45 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
         }
 
         /**
-         * Build a resilient onClick callback for combat quick actions.
-         * This is a hybrid bridge: encodedValue remains the primary route,
-         * while onClick provides a direct AppV2-safe fallback path.
-         * @private
-         * @param {object|Function} payloadOrFactory
-         * @returns {Function}
-         */
-        #makeCombatQuickOnClick (payloadOrFactory) {
-            if (this.isMultiTokenSelection) return undefined
-            return async (event) => {
-                const payload = typeof payloadOrFactory === 'function'
-                    ? (payloadOrFactory() ?? {})
-                    : (payloadOrFactory ?? {})
-
-                const actor = this.actor
-                const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor?.id) ?? actor?.getActiveTokens?.()?.[0] ?? null
-                await executeCombatQuickActionForActor(actor, payload, {
-                    token,
-                    shiftKey: !!event?.shiftKey
-                })
-            }
-        }
-
-        /**
-         * Build system actions
-         * Called by Token Action HUD Core
-         * @override
-         * @param {array} groupIds
+         * Core supplies layout group IDs on every normal build.
+         * Core owns actor/token context; derived data lasts for one build.
          */
         async buildSystemActions (groupIds) {
-            // For safety, bypass caching for partial builds.
-            const isPartialBuild = Array.isArray(groupIds) && groupIds.length > 0
-
-            // Determine controlled actors for this build.
-            // Token Action HUD Core may provide `this.actor` only for single-token selection.
-            // When multiple tokens are selected, we derive a deterministic actor set here.
+            this._attackTrackerViews = new Map()
+            this._itemIndex = null
+            this._multiItemIndexes = new Map()
+            this.items = []
+            this._uesrpgActors = []
             this.isMultiTokenSelection = false
-
+            this.actorType = null
+            const controlled = Array.from(canvas?.tokens?.controlled ?? [])
+            if (controlled.some(token => !isSupportedActor(token?.actor))) return
             if (this.actor && !isSupportedActor(this.actor)) return
 
-            if (!this.actor) {
-                const controlledTokens = (canvas?.tokens?.controlled ?? []).filter(t => isSupportedActor(t?.actor))
-                if (!controlledTokens.length) return
+            this.isMultiTokenSelection = !this.actor && controlled.length > 1
+            this._uesrpgActors = this.actor ? [this.actor] : controlled.map(token => token.actor)
+            if (!this._uesrpgActors.length) return
+            if (!this.actor && !this.isMultiTokenSelection) return
+            if (new Set(this._uesrpgActors.map(actor => actor.type)).size !== 1) return
 
-                const actors = controlledTokens.map(t => t.actor).filter(Boolean)
-                if (!actors.length) return
-
-                // Do not show HUD for mixed supported actor types.
-                const firstType = actors[0].type
-                if (!actors.every(a => a.type === firstType)) return
-
-                // Representative actor: required for Core handler methods that assume `this.actor` exists.
-                this.actor = actors[0]
-                this.actors = actors
-                this.isMultiTokenSelection = actors.length > 1
+            if (this.isMultiTokenSelection) {
+                this.#buildMultiTokenExecutionActions()
+                await this.#buildStatusEffects({ multiToken: true })
             } else {
-                this.actors = [this.actor]
-                this.isMultiTokenSelection = false
-            }
-
-            this.actorType = this.actor?.type
-            diagLog('HUD build actor types', {
-                actorType: this.actorType,
-                supported: isSupportedActorType(this.actorType),
-                isMultiTokenSelection: this.isMultiTokenSelection
-            })
-
-            // Phase 3: apply conservative cache for single-token selection only.
-            // - We key by Token id to account for token-local state (status effects/overlays).
-            // - Invalidation is hook-based only; document `_stats` is not a public Foundry API.
-            if (!isPartialBuild && !this.isMultiTokenSelection) {
-                const token = this.token ?? canvas?.tokens?.controlled?.[0] ?? null
-                const cacheKey = token?.id ?? null
-                if (cacheKey) {
-                    const cached = getBuildCacheEntry(cacheKey)
-                    const actorId = this.actor?.id ?? null
-
-                    if (cached && cached.actorId === actorId) {
-                        for (const rec of cached.records ?? []) {
-                            super.addActions(rec.actions, rec.groupData)
-                        }
-                        return
-                    }
-                }
-            }
-
-            // Set items variable - ensure it's always initialized
-            if (this.actor?.items) {
-                let items = this.actor.items
-                items = coreModule.api.Utils.sortItemsByName(items)
-                // Ensure items is always set (even if empty)
-                // sortItemsByName may return Collection or Array - both are fine
-                this.items = items || this.actor.items || []
-            } else {
-                // Initialize empty array if no actor
-                this.items = []
-            }
-
-            // Build per-build item index (Phase 2 performance)
-            this.#buildItemIndex()
-
-            if (isSupportedActorType(this.actorType)) {
+                this.actorType = this.actor.type
+                this.items = coreModule.api.Utils.sortItemsByName(this.actor.items) ?? this.actor.items ?? []
+                this.#buildItemIndex()
                 await this.#buildCharacterActions()
             }
 
-            // Add multi-token execution actions when multiple supported actors of the same type are selected.
-            // This is intentionally additive and does not change the single-token experience.
-            if (this.isMultiTokenSelection) {
-                this.#buildMultiTokenExecutionActions()
-            }
-
-            // Phase 4: run registered build extensions (additive).
-            // Skip partial builds to avoid accidental duplication when Core requests a single group refresh.
-            if (!isPartialBuild) {
-                const token = this.token ?? canvas?.tokens?.controlled?.[0] ?? null
-                await runBuildExtensions({
-                    handler: this,
-                    actor: this.actor,
-                    token,
-                    actors: Array.isArray(this.actors) ? this.actors : [this.actor].filter(Boolean),
-                    isMultiTokenSelection: !!this.isMultiTokenSelection,
-                    delimiter: this.delimiter
-                })
-            }
-
-            // Phase 3: store cache for single-token full builds only.
-            if (!isPartialBuild && !this.isMultiTokenSelection) {
-                const token = this.token ?? canvas?.tokens?.controlled?.[0] ?? null
-                const cacheKey = token?.id ?? null
-                if (cacheKey && Array.isArray(this._uesrpgBuildRecords) && this._uesrpgBuildRecords.length > 0) {
-                    const actorId = this.actor?.id ?? null
-
-                    setBuildCacheEntry(cacheKey, {
-                        actorId,
-                        tokenId: token?.id ?? null,
-                        records: this._uesrpgBuildRecords
-                    })
-                    // actor->cacheKey indexing is handled by cache.js
-                }
-            }
+            await runBuildExtensions({
+                handler: this,
+                actor: this.actor ?? null,
+                token: this.actor ? resolveActorToken(this.actor, this.token) : null,
+                actors: [...this._uesrpgActors],
+                isMultiTokenSelection: this.isMultiTokenSelection,
+                delimiter: this.delimiter
+            })
         }
 
         /**
@@ -941,7 +813,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const mode = game.settings.get(MODULE.ID, 'multiTokenItemExecutionMode') ?? 'intersection'
             if (mode === 'off') return
 
-            const actors = Array.isArray(this.actors) ? this.actors.filter(a => !!a) : []
+            const actors = this._uesrpgActors ?? []
             if (actors.length < 2) return
 
             this.#buildMultiTokenAttacks(actors, mode)
@@ -978,38 +850,41 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const utilityActions = []
 
             // Health is represented by system.hp + system.tempHP in the current system schema.
-            const hpV = Number(this.actor.system?.hp?.value ?? 0)
-            const hpM = Number(this.actor.system?.hp?.max ?? 0)
-            const tempHP = Number(this.actor.system?.tempHP ?? this.actor.system?.hp?.temp ?? 0)
-            const spV = Number(this.actor.system?.stamina?.value ?? 0)
-            const spM = Number(this.actor.system?.stamina?.max ?? 0)
-            const mpV = Number(this.actor.system?.magicka?.value ?? 0)
-            const mpM = Number(this.actor.system?.magicka?.max ?? 0)
-            const lpV = Number(this.actor.system?.luck_points?.value ?? 0)
-            const lpM = Number(this.actor.system?.luck_points?.max ?? 0)
+            const displayNumber = value => value != null && Number.isFinite(Number(value)) ? Number(value) : '—'
+            const hpV = displayNumber(this.actor.system?.hp?.value)
+            const hpM = displayNumber(this.actor.system?.hp?.max)
+            const tempHP = displayNumber(this.actor.system?.tempHP)
+            const spV = displayNumber(this.actor.system?.stamina?.value)
+            const spM = displayNumber(this.actor.system?.stamina?.max)
+            const mpV = displayNumber(this.actor.system?.magicka?.value)
+            const mpM = displayNumber(this.actor.system?.magicka?.max)
+            const lpV = displayNumber(this.actor.system?.luck_points?.value)
+            const lpM = displayNumber(this.actor.system?.luck_points?.max)
 
             resourceActions.push({
                 id: 'resource-health',
                 name: tempHP > 0 ? `Health ${hpV}/${hpM} (+${tempHP})` : `Health ${hpV}/${hpM}`,
-                encodedValue: ['resources', 'resource-health'].join(this.delimiter),
+                system: { actionTypeId: 'resources', actionId: 'resource-health' },
                 cssClass: 'shrink uesrpg-resource-badge'
             })
             resourceActions.push({
                 id: 'resource-magicka',
                 name: `Magicka ${mpV}/${mpM}`,
-                encodedValue: ['resources', 'resource-magicka'].join(this.delimiter),
+                system: { actionTypeId: 'resources', actionId: 'resource-magicka' },
                 cssClass: 'shrink uesrpg-resource-badge'
             })
             resourceActions.push({
                 id: 'resource-stamina',
                 name: `Stamina ${spV}/${spM}`,
-                encodedValue: ['resources', 'resource-stamina'].join(this.delimiter),
+                system: { actionTypeId: 'resources', actionId: 'resource-stamina' },
                 cssClass: 'shrink uesrpg-resource-badge'
             })
             resourceActions.push({
                 id: 'resource-luck',
-                name: `Luck ${lpV}/${lpM}`,
-                encodedValue: ['resources', 'resource-luck'].join(this.delimiter),
+                name: game.i18n.localize('tokenActionHud.uesrpg3ev4.burnLuck'),
+                info1: this.#textInfo(`LP ${lpV}/${lpM}`),
+                tooltip: game.i18n.localize('tokenActionHud.uesrpg3ev4.burnLuckHint'),
+                system: { actionTypeId: 'resources', actionId: 'resource-luck' },
                 cssClass: 'shrink uesrpg-resource-badge'
             })
 
@@ -1017,39 +892,40 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             utilityActions.push({
                 id: 'shortRest',
                 name: 'Short Rest',
-                encodedValue: ['utility', 'shortRest'].join(this.delimiter)
+                system: { actionTypeId: 'utility', actionId: 'shortRest' }
             })
             utilityActions.push({
                 id: 'longRest',
                 name: 'Long Rest',
-                encodedValue: ['utility', 'longRest'].join(this.delimiter)
+                system: { actionTypeId: 'utility', actionId: 'longRest' }
             })
 
             if (resourceActions.length > 0) this.addActions(resourceActions, resourceGroupData)
             if (utilityActions.length > 0) this.addActions(utilityActions, utilityGroupData)
         }
 
-        /**
-         * Build multiple token actions
-         * @private
-         * @returns {object}
-         */
-        #buildMultipleTokenActions () {
-            // Multi-token: expose deterministic controls and (optionally) multi-token item execution.
-            // Status Effects: union display, toggle-all semantics.
-            // Active Effects are intentionally omitted because effect-id intersection is not deterministic across actors.
-            this.#buildStatusEffects({ multiToken: true })
+        /** Per-build item buckets shared by the multi-selection builders. */
+        #getMultiItems (actor, type) {
+            if (!this._multiItemIndexes.has(actor)) {
+                const byType = new Map()
+                for (const item of actor.items ?? []) {
+                    const items = byType.get(item.type) ?? []
+                    items.push(item)
+                    byType.set(item.type, items)
+                }
+                this._multiItemIndexes.set(actor, byType)
+            }
+            return this._multiItemIndexes.get(actor).get(type) ?? []
+        }
 
-            const mode = game.settings.get(MODULE.ID, 'multiTokenItemExecutionMode') ?? 'intersection'
-            if (mode === 'off') return
-
-            // Multi-token execution actions for Attacks, Spells and Activated Talents.
-            const actors = Array.isArray(this.actors) ? this.actors.filter(a => !!a) : []
-            if (actors.length < 2) return
-
-            this.#buildMultiTokenAttacks(actors, mode)
-            this.#buildMultiTokenSpells(actors, mode)
-            this.#buildMultiTokenTalents(actors, mode)
+        #getUnambiguousMultiItems (actor, type, predicate = () => true) {
+            const candidates = this.#getMultiItems(actor, type).filter(predicate)
+            const names = new Map()
+            for (const item of candidates) {
+                const key = String(item.name ?? '').trim().toLowerCase()
+                if (key) names.set(key, (names.get(key) ?? 0) + 1)
+            }
+            return candidates.filter(item => names.get(String(item.name ?? '').trim().toLowerCase()) === 1)
         }
 
         /**
@@ -1064,12 +940,11 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const groupData = { id: groupId, type: 'system' }
             const actions = []
 
-            const hasMeleeByActor = actors.map(a => a.items?.some(i =>
-                i.type === 'weapon' &&
-                i.system?.equipped &&
+            const hasMeleeByActor = actors.map(a => this.#getMultiItems(a, 'weapon').some(i =>
+                i.system?.equipped === true &&
                 String(i.system?.attackMode ?? '') !== 'ranged'
             ))
-            const hasRangedByActor = actors.map(a => a.items?.some(i => i.type === 'weapon' && i.system?.equipped && i.system?.attackMode === 'ranged'))
+            const hasRangedByActor = actors.map(a => this.#getMultiItems(a, 'weapon').some(i => i.system?.equipped === true && i.system?.attackMode === 'ranged'))
 
             const showMelee = mode === 'union' ? hasMeleeByActor.some(Boolean) : hasMeleeByActor.every(Boolean)
             const showRanged = mode === 'union' ? hasRangedByActor.some(Boolean) : hasRangedByActor.every(Boolean)
@@ -1078,7 +953,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 actions.push({
                     id: 'multi-attack-melee',
                     name: this.#withAttackTracker(`Shared ${coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.attackMelee')}`),
-                    encodedValue: ['multiCombat', 'attack~melee'].join(this.delimiter)
+                    system: { actionTypeId: 'multiCombat', actionId: 'attack~melee' }
                 })
             }
 
@@ -1086,7 +961,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 actions.push({
                     id: 'multi-attack-ranged',
                     name: this.#withAttackTracker(`Shared ${coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.attackRanged')}`),
-                    encodedValue: ['multiCombat', 'attack~ranged'].join(this.delimiter)
+                    system: { actionTypeId: 'multiCombat', actionId: 'attack~ranged' }
                 })
             }
 
@@ -1106,7 +981,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
         #buildMultiTokenSpells (actors, mode) {
             // Group by school for readability, but match by name.
             const perActor = actors.map(a => {
-                const spells = a.items?.filter(i => i.type === 'spell') ?? []
+                const spells = this.#getUnambiguousMultiItems(a, 'spell')
                 const seen = new Set()
                 return spells.reduce((entries, s) => {
                     const nameKey = String(s.name ?? '').trim().toLowerCase()
@@ -1152,7 +1027,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 const actions = list.map(e => ({
                     id: `multi-spell-${e.nameKey}`,
                     name: e.name,
-                    encodedValue: ['multiItem', `spell~${encodeURIComponent(e.nameKey)}`].join(this.delimiter)
+                    system: { actionTypeId: 'multiItem', actionId: `spell~${encodeURIComponent(e.nameKey).replace(/~/g, '%7E')}` }
                 }))
                 this.addActions(actions, groupData)
             }
@@ -1166,7 +1041,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          */
         #buildMultiTokenTalents (actors, mode) {
             const perActor = actors.map(a => {
-                const talents = a.items?.filter(i => i.type === 'talent' && i.system?.activation?.enabled === true) ?? []
+                const talents = this.#getUnambiguousMultiItems(a, 'talent', item => item.system?.activation?.enabled === true)
                 const seen = new Set()
                 return talents.reduce((entries, t) => {
                     const nameKey = String(t.name ?? '').trim().toLowerCase()
@@ -1202,7 +1077,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const actions = keys.map(k => ({
                 id: `multi-talent-${k}`,
                 name: labels.get(k) ?? k,
-                encodedValue: ['multiItem', `talent~${encodeURIComponent(k)}`].join(this.delimiter)
+                system: { actionTypeId: 'multiItem', actionId: `talent~${encodeURIComponent(k).replace(/~/g, '%7E')}` }
             }))
 
             this.addActions(actions, groupData)
@@ -1220,13 +1095,15 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const groupData = { id: groupId, type: 'system' }
             const actions = []
 
-            // CONFIG.statusEffects is the authoritative list for the current world.
-            const statusEffects = Array.isArray(CONFIG?.statusEffects) ? CONFIG.statusEffects : []
+            const actors = multiToken ? this._uesrpgActors : [this.actor].filter(Boolean)
+            if (!actors?.length) return
+            // Match v14's configured Token HUD visibility and actor-type restrictions.
+            const statusEffects = getStatusEffectConfigs().filter(effect => {
+                if (effect.hud === false) return false
+                const types = effect.hud?.actorTypes
+                return !Array.isArray(types) || actors.every(actor => types.includes(actor.type))
+            }).sort((left, right) => (Number(left.order) || 0) - (Number(right.order) || 0))
             if (statusEffects.length === 0) return
-
-            // Determine which tokens/actors we are operating on.
-            const tokens = multiToken ? (canvas?.tokens?.controlled ?? []) : (this.token ? [this.token] : [])
-            if (tokens.length === 0) return
 
             // Precompute active-state per statusId.
             // Union semantics for display: active if any selected token has it.
@@ -1237,8 +1114,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 if (!statusId) continue
                 let any = false
                 let all = true
-                for (const t of tokens) {
-                    const has = t?.document?.hasStatusEffect ? t.document.hasStatusEffect(statusId) : false
+                for (const actor of actors) {
+                    const has = actor.statuses?.has(statusId) === true
                     any = any || has
                     all = all && has
                 }
@@ -1250,7 +1127,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 const statusId = String(se?.id ?? '')
                 if (!statusId) continue
                 const name = se?.name ? coreModule.api.Utils.i18n(se.name) : statusId
-                const icon = se?.icon ?? null
+                const icon = se?.img ?? null
 
                 const isActive = activeById.get(statusId) === true
                 const isAll = allById.get(statusId) === true
@@ -1258,7 +1135,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 actions.push({
                     id: statusId,
                     name,
-                    encodedValue: ['statusEffect', statusId].join(this.delimiter),
+                    system: { actionTypeId: 'statusEffect', actionId: statusId },
                     img: icon,
                     cssClass: isActive ? (isAll ? 'active' : 'active uesrpg-tah-partial') : ''
                 })
@@ -1267,7 +1144,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             if (actions.length > 0) {
                 this.addActions(actions, groupData)
             } else {
-                this.#logOmittedGroup(groupId, 'no magic skills')
+                this.#logOmittedGroup(groupId, 'no status effects')
             }
         }
 
@@ -1301,7 +1178,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 actions.push({
                     id,
                     name,
-                    encodedValue: ['activeEffect', id].join(this.delimiter),
+                    system: { actionTypeId: 'activeEffect', actionId: id },
                     cssClass: isEnabled ? 'active' : ''
                 })
             }
@@ -1346,15 +1223,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 const label = weaponLabels.get(String(weaponEntry.id)) ?? (weaponEntry.item?.name ?? 'Weapon')
                 actions.push({
                     id: `attack-melee-${weaponEntry.id}`,
-                    name: this.#withAttackTracker(label),
-                    encodedValue: ['meleeWeaponAttack', weaponEntry.id].join(this.delimiter),
+                    name: this.#withAttackTracker(label, { attackMode: weaponEntry.mode, weaponId: weaponEntry.id }),
+                    system: { actionTypeId: 'meleeWeaponAttack', actionId: weaponEntry.id },
                     ...this.#buildWeaponAttackMetadata(weaponEntry.item),
-                    onClick: this.#makeCombatQuickOnClick({
-                        combatAction: 'attack',
-                        action: 'attack',
-                        weaponId: weaponEntry.id,
-                        label
-                    })
                 })
             }
 
@@ -1362,15 +1233,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 const label = weaponLabels.get(String(weaponEntry.id)) ?? (weaponEntry.item?.name ?? 'Weapon')
                 actions.push({
                     id: `attack-ranged-${weaponEntry.id}`,
-                    name: this.#withAttackTracker(label),
-                    encodedValue: ['rangedWeaponAttack', weaponEntry.id].join(this.delimiter),
+                    name: this.#withAttackTracker(label, { attackMode: weaponEntry.mode, weaponId: weaponEntry.id }),
+                    system: { actionTypeId: 'rangedWeaponAttack', actionId: weaponEntry.id },
                     ...this.#buildWeaponAttackMetadata(weaponEntry.item),
-                    onClick: this.#makeCombatQuickOnClick({
-                        combatAction: 'attack',
-                        action: 'attack',
-                        weaponId: weaponEntry.id,
-                        label
-                    })
                 })
             }
 
@@ -1378,15 +1243,14 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             actions.push({
                 id: 'aim',
                 name: coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.aim'),
-                encodedValue: ['aim', 'aim'].join(this.delimiter),
-                onClick: this.#makeCombatQuickOnClick({ combatAction: 'aim', action: 'aim', label: 'Aim' })
+                system: { actionTypeId: 'aim', actionId: 'aim' },
             })
 
             // Cast Magic - opens spell selection dialog
             actions.push({
                 id: 'cast-magic',
                 name: coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.castMagic'),
-                encodedValue: ['castMagic', 'cast'].join(this.delimiter)
+                system: { actionTypeId: 'castMagic', actionId: 'cast' }
             })
 
             if (actions.length > 0) {
@@ -1409,59 +1273,49 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             actions.push({
                 id: 'dash',
                 name: coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.dash'),
-                encodedValue: ['dash', 'dash'].join(this.delimiter),
-                onClick: this.#makeCombatQuickOnClick({ combatAction: 'dash', action: 'dash', label: 'Dash' })
+                system: { actionTypeId: 'dash', actionId: 'dash' },
             })
 
             // Delay - defer turn timing
             actions.push({
                 id: 'delay',
                 name: coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.delay'),
-                encodedValue: ['delay', 'delay'].join(this.delimiter),
-                onClick: this.#makeCombatQuickOnClick({ combatAction: 'delay', action: 'delay', label: 'Delay' })
+                system: { actionTypeId: 'delay', actionId: 'delay' },
             })
 
             // Disengage - retreat without attacks of opportunity
             actions.push({
                 id: 'disengage',
                 name: coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.disengage'),
-                encodedValue: ['disengage', 'disengage'].join(this.delimiter),
-                onClick: this.#makeCombatQuickOnClick({ combatAction: 'disengage', action: 'disengage', label: 'Disengage' })
+                system: { actionTypeId: 'disengage', actionId: 'disengage' },
             })
 
             // Hide - stealth action
             actions.push({
                 id: 'hide',
                 name: coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.hide'),
-                encodedValue: ['hide', 'hide'].join(this.delimiter),
-                onClick: this.#makeCombatQuickOnClick({ combatAction: 'hide', action: 'hide', label: 'Hide' })
+                system: { actionTypeId: 'hide', actionId: 'hide' },
             })
 
             // Use Item - consumable item usage
             actions.push({
                 id: 'use-item',
                 name: coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.useItem'),
-                encodedValue: ['useItem', 'use'].join(this.delimiter),
-                onClick: this.#makeCombatQuickOnClick({ combatAction: 'use-item', action: 'use-item', label: 'Use Item' })
+                system: { actionTypeId: 'useItem', actionId: 'use' },
             })
 
             // Cast Magic (Instant / secondary lane)
             actions.push({
                 id: 'cast-magic-instant',
                 name: coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.castMagicInstant'),
-                encodedValue: ['castMagic', 'instant'].join(this.delimiter)
+                system: { actionTypeId: 'castMagic', actionId: 'instant' }
             })
 
             // Extinguish Burning - explicit turn action for burning condition.
             actions.push({
                 id: 'extinguish-burning',
                 name: coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.extinguishBurning'),
-                encodedValue: ['extinguishBurning', 'extinguish-burning'].join(this.delimiter),
-                onClick: this.#makeCombatQuickOnClick({
-                    combatAction: 'extinguish-burning',
-                    action: 'extinguish-burning',
-                    label: 'Put Out Fire'
-                })
+                system: { actionTypeId: 'extinguishBurning', actionId: 'extinguish-burning' },
             })
 
             // Reload Weapon (only if ranged weapon equipped)
@@ -1475,9 +1329,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 actions.push({
                     id: 'reload-weapon',
                     name: needsReload ? `Reload (${reloadCost} AP)` : 'Reload Weapon',
-                    encodedValue: ['secondaryAction', 'reload-weapon'].join(this.delimiter),
+                    system: { actionTypeId: 'secondaryAction', actionId: 'reload-weapon' },
                     cssClass: needsReload ? 'active' : '',
-                    onClick: this.#makeCombatQuickOnClick({ combatAction: 'reload-weapon', action: 'reload-weapon', label: 'Reload Weapon' })
                 })
             }
 
@@ -1501,20 +1354,14 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             actions.push({
                 id: 'defensive-stance',
                 name: coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.defensiveStance'),
-                encodedValue: ['defensiveStance', 'stance'].join(this.delimiter),
-                onClick: this.#makeCombatQuickOnClick({ combatAction: 'defensive-stance', action: 'defensive-stance', label: 'Defensive Stance' })
+                system: { actionTypeId: 'defensiveStance', actionId: 'stance' },
             })
 
             // Opportunity Attack - reaction attack
             actions.push({
                 id: 'opportunity-attack',
                 name: this.#withAttackTracker(coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.opportunityAttack')),
-                encodedValue: ['opportunityAttack', 'opportunity'].join(this.delimiter),
-                onClick: this.#makeCombatQuickOnClick({
-                    combatAction: 'attack-of-opportunity',
-                    action: 'attack-of-opportunity',
-                    label: coreModule.api.Utils.i18n('tokenActionHud.uesrpg3ev4.opportunityAttack')
-                })
+                system: { actionTypeId: 'opportunityAttack', actionId: 'opportunity' },
             })
 
             if (actions.length > 0) {
@@ -1536,39 +1383,19 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             try {
                 const list = await SystemAdapter.buildSpecialActionsForActor(this.actor)
 
+                if (!Array.isArray(list)) return
                 list.forEach(sa => {
                     const id = String(sa?.id ?? '').trim()
                     if (!id) return
                     actions.push({
                         id,
                         name: sa?.name ?? id,
-                        encodedValue: ['specialAction', id].join(this.delimiter),
+                        system: { actionTypeId: 'specialAction', actionId: id },
                         cssClass: sa?.known ? 'active' : '',
-                        onClick: this.#makeCombatQuickOnClick({
-                            combatAction: 'specialAction',
-                            action: 'specialAction',
-                            specialId: id,
-                            actionType: String(sa?.actionType ?? 'primary')
-                        })
                     })
                 })
             } catch (err) {
-                debugLog('Special actions import failed, using fallback list', err)
-                const fallback = ['arise', 'bash', 'blindOpponent', 'disarm', 'feint', 'forceMovement', 'resist', 'trip']
-                fallback.forEach(action => {
-                    const label = action.replace(/([A-Z])/g, ' $1').replace(/^./, c => c.toUpperCase())
-                    actions.push({
-                        id: action,
-                        name: label,
-                        encodedValue: ['specialAction', action].join(this.delimiter),
-                        onClick: this.#makeCombatQuickOnClick({
-                            combatAction: 'specialAction',
-                            action: 'specialAction',
-                            specialId: action,
-                            actionType: 'primary'
-                        })
-                    })
-                })
+                debugLog('System special actions unavailable', err)
             }
 
             if (actions.length > 0) {
@@ -1627,8 +1454,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 actions.push({
                     id: `cha-${chaKey}`,
                     name: label,
-                    encodedValue: ['characteristic', chaKey].join(this.delimiter),
-                    info1: { text: `${total}` }
+                    system: { actionTypeId: 'characteristic', actionId: chaKey },
+                    info1: this.#textInfo(`${total}`)
                 })
             }
 
@@ -1685,8 +1512,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                     actions.push({
                         id: `prof-${key}`,
                         name,
-                        encodedValue: ['profession', key].join(this.delimiter),
-                        info1: { text: `${value}%` }
+                        system: { actionTypeId: 'profession', actionId: key },
+                        info1: this.#textInfo(`${value}%`)
                     })
                 }
 
@@ -1708,8 +1535,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                     actions.push({
                         id: `prof-${key}`,
                         name,
-                        encodedValue: ['profession', key].join(this.delimiter),
-                        info1: { text: `${tn}%` }
+                        system: { actionTypeId: 'profession', actionId: key },
+                        info1: this.#textInfo(`${tn}%`)
                     })
                 }
             } else {
@@ -1724,9 +1551,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                     actions.push({
                         id: itemId,
                         name,
-                        encodedValue: ['skill', itemId].join(this.delimiter),
-                        info1: { text: `${tn}%` },
-                        ...(rankAbbr ? { info2: { text: rankAbbr } } : {})
+                        system: { actionTypeId: 'skill', actionId: itemId },
+                        info1: this.#textInfo(`${tn}%`),
+                        ...(rankAbbr ? { info2: this.#textInfo(rankAbbr) } : {})
                     })
                 }
             }
@@ -1761,9 +1588,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 actions.push({
                     id: itemId,
                     name,
-                    encodedValue: ['magicSkill', itemId].join(this.delimiter),
-                    info1: { text: `${tn}%` },
-                    ...(rankAbbr ? { info2: { text: rankAbbr } } : {})
+                    system: { actionTypeId: 'magicSkill', actionId: itemId },
+                    info1: this.#textInfo(`${tn}%`),
+                    ...(rankAbbr ? { info2: this.#textInfo(rankAbbr) } : {})
                 })
             }
 
@@ -1795,9 +1622,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 actions.push({
                     id: itemId,
                     name,
-                    encodedValue: ['combatStyle', itemId].join(this.delimiter),
-                    info1: { text: `${value}%` },
-                    ...(rankAbbr ? { info2: { text: rankAbbr } } : {}),
+                    system: { actionTypeId: 'combatStyle', actionId: itemId },
+                    info1: this.#textInfo(`${value}%`),
+                    ...(rankAbbr ? { info2: this.#textInfo(rankAbbr) } : {}),
                     cssClass: active ? 'active' : ''
                 })
             }
@@ -1819,7 +1646,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             actions.push({
                 id: 'manage-languages',
                 name: game.i18n.localize('tokenActionHud.uesrpg3ev4.manageLanguages'),
-                encodedValue: ['manageLanguages', 'manage'].join(this.delimiter)
+                system: { actionTypeId: 'manageLanguages', actionId: 'manage' }
             })
 
             if (actorEntries.length > 0) {
@@ -1830,9 +1657,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                     const isActive = entry?.active === true || entry?.enabled === true || entry?.known === true
 
                     actions.push({
-                        id: syntheticId,
+                        id: `languageEntry-${syntheticId}`,
                         name,
-                        encodedValue: ['languageEntry', syntheticId].join(this.delimiter),
+                        system: { actionTypeId: 'languageEntry', actionId: syntheticId },
                         ...(hasExplicitState && isActive ? { cssClass: 'active' } : {}),
                         ...this.#buildLanguageEntryMetadata(entry)
                     })
@@ -1843,7 +1670,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                     actions.push({
                         id: itemId,
                         name: itemData.name ?? 'Language',
-                        encodedValue: ['language', itemId].join(this.delimiter)
+                        system: { actionTypeId: 'language', actionId: itemId }
                     })
                 }
             }
@@ -1863,7 +1690,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             actions.push({
                 id: 'manage-factions',
                 name: game.i18n.localize('tokenActionHud.uesrpg3ev4.manageFactions'),
-                encodedValue: ['manageFactions', 'manage'].join(this.delimiter)
+                system: { actionTypeId: 'manageFactions', actionId: 'manage' }
             })
 
             if (actorEntries.length > 0) {
@@ -1874,9 +1701,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                     const isActive = entry?.active === true || entry?.enabled === true
 
                     actions.push({
-                        id: syntheticId,
+                        id: `factionEntry-${syntheticId}`,
                         name,
-                        encodedValue: ['factionEntry', syntheticId].join(this.delimiter),
+                        system: { actionTypeId: 'factionEntry', actionId: syntheticId },
                         ...(hasExplicitState && isActive ? { cssClass: 'active' } : {}),
                         ...this.#buildFactionEntryMetadata(entry)
                     })
@@ -1887,7 +1714,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                     actions.push({
                         id: itemId,
                         name: itemData.name ?? 'Faction',
-                        encodedValue: ['faction', itemId].join(this.delimiter)
+                        system: { actionTypeId: 'faction', actionId: itemId }
                     })
                 }
             }
@@ -1935,9 +1762,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 actions.push({
                     id: itemId,
                     name,
-                    encodedValue: ['weapon', itemId].join(this.delimiter),
-                    info1: { text: damage },
-                    ...(chargeText ? { info2: { text: chargeText } } : {}),
+                    system: { actionTypeId: 'weapon', actionId: itemId },
+                    info1: this.#textInfo(damage),
+                    ...(chargeText ? { info2: this.#textInfo(chargeText) } : {}),
                     cssClass: equipped ? 'active' : '' // Highlight if equipped
                 })
             }
@@ -1968,9 +1795,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 actions.push({
                     id: itemId,
                     name,
-                    encodedValue: ['armor', itemId].join(this.delimiter),
-                    info1: { text: `AR ${ar}` },
-                    ...(hasMar ? { info2: { text: `MAR ${mar}` } } : {}),
+                    system: { actionTypeId: 'armor', actionId: itemId },
+                    info1: this.#textInfo(`AR ${ar}`),
+                    ...(hasMar ? { info2: this.#textInfo(`MAR ${mar}`) } : {}),
                     cssClass: equipped ? 'active' : ''
                 })
             }
@@ -2000,9 +1827,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 actions.push({
                     id: itemId,
                     name: itemData.name,
-                    encodedValue: ['shield', itemId].join(this.delimiter),
-                    info1: { text: `BR ${br}` },
-                    ...(hasMbr ? { info2: { text: `MBR ${mbr}` } } : {}),
+                    system: { actionTypeId: 'shield', actionId: itemId },
+                    info1: this.#textInfo(`BR ${br}`),
+                    ...(hasMbr ? { info2: this.#textInfo(`MBR ${mbr}`) } : {}),
                     cssClass: equipped ? 'active' : ''
                 })
             }
@@ -2032,8 +1859,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 actions.push({
                     id: itemId,
                     name,
-                    encodedValue: ['item', itemId].join(this.delimiter),
-                    ...(quantity > 1 ? { info1: { text: `x${quantity}` } } : {}),
+                    system: { actionTypeId: 'item', actionId: itemId },
+                    ...(quantity > 1 ? { info1: this.#textInfo(`x${quantity}`) } : {}),
                     cssClass: equipped ? 'active' : '' // Highlight if equipped
                 })
             }
@@ -2059,8 +1886,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 actions.push({
                     id: itemId,
                     name: itemData.name ?? 'Container',
-                    encodedValue: ['container', itemId].join(this.delimiter),
-                    ...(capacity ? { info1: { text: capacity } } : {})
+                    system: { actionTypeId: 'container', actionId: itemId },
+                    ...(capacity ? { info1: this.#textInfo(capacity) } : {})
                 })
             }
 
@@ -2090,9 +1917,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 actions.push({
                     id: itemId,
                     name,
-                    encodedValue: ['ammunition', itemId].join(this.delimiter),
-                    info1: { text: `x${quantity}` },
-                    ...(chargeText ? { info2: { text: chargeText } } : {}),
+                    system: { actionTypeId: 'ammunition', actionId: itemId },
+                    info1: this.#textInfo(`x${quantity}`),
+                    ...(chargeText ? { info2: this.#textInfo(chargeText) } : {}),
                     cssClass: equipped ? 'active' : ''
                 })
             }
@@ -2117,9 +1944,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 actions.push({
                     id: itemId,
                     name: itemData.name ?? 'Scroll',
-                    encodedValue: ['scroll', itemId].join(this.delimiter),
-                    info1: { text: `x${quantity}` },
-                    ...(spellUuid ? { info2: { text: 'Linked Spell' } } : {})
+                    system: { actionTypeId: 'scroll', actionId: itemId },
+                    info1: this.#textInfo(`x${quantity}`),
+                    ...(spellUuid ? { info2: this.#textInfo('Linked Spell') } : {})
                 })
             }
 
@@ -2139,11 +1966,11 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
                 const description = itemData.system?.description || itemData.system?.flavor || ''
                 actions.push({
-                    id: itemId,
+                    id: `castEnchantment-${itemId}`,
                     name: itemData.name ?? itemId,
-                    encodedValue: [ACTION_TYPE.castEnchantment, itemId].join(this.delimiter),
+                    system: { actionTypeId: 'castEnchantment', actionId: itemId },
                     img: itemData.img,
-                    tooltip: description
+                    tooltip: `${this.#tooltipPlainText(description)}<br>${escapeText(game.i18n.localize('tokenActionHud.uesrpg3ev4.openActorSheetForEnchantment'))}`
                 })
             }
 
@@ -2196,9 +2023,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                     actions.push({
                         id: itemId,
                         name,
-                        encodedValue: ['spell', itemId].join(this.delimiter),
-                        info1: { text: `MP ${mpCost}` },
-                        info2: { text: `Level ${level}` },
+                        system: { actionTypeId: 'spell', actionId: itemId },
+                        info1: this.#textInfo(`MP ${mpCost}`),
+                        info2: this.#textInfo(`Level ${level}`),
                         tooltip: description
                     })
                 }

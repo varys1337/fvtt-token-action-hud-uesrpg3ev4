@@ -1,11 +1,12 @@
 import { MODULE } from './constants.js'
+import { requestHudRefresh } from './cache.js'
 
 /**
  * Register module settings
  * Called by Token Action HUD Core to register Token Action HUD system module settings
- * @param {function} coreUpdate Token Action HUD Core update function
+ * @param {function} _coreUpdate Core's setting-cache callback (for Core-owned settings only)
  */
-export function register (coreUpdate) {
+export function register (_coreUpdate) {
     game.settings.register(MODULE.ID, 'passiveFeatureRightClick', {
         name: game.i18n.localize('tokenActionHud.uesrpg3ev4.settings.passiveFeatureRightClick.name'),
         hint: game.i18n.localize('tokenActionHud.uesrpg3ev4.settings.passiveFeatureRightClick.hint'),
@@ -17,9 +18,7 @@ export function register (coreUpdate) {
             sheet: game.i18n.localize('tokenActionHud.uesrpg3ev4.settings.passiveFeatureRightClick.choices.sheet')
         },
         default: 'chat',
-        onChange: (value) => {
-            coreUpdate(value)
-        }
+        onChange: () => requestHudRefresh()
     })
 
     // Multi-token execution mode for Attacks/Spells/Talents when multiple tokens are selected.
@@ -38,9 +37,7 @@ export function register (coreUpdate) {
             union: game.i18n.localize('tokenActionHud.uesrpg3ev4.settings.multiTokenItemExecutionMode.choices.union')
         },
         default: 'intersection',
-        onChange: (value) => {
-            coreUpdate(value)
-        }
+        onChange: () => requestHudRefresh()
     })
 
     // Unified debug toggle: controls all HUD debug and diagnostics logging.
@@ -51,10 +48,7 @@ export function register (coreUpdate) {
         config: true,
         type: Boolean,
         default: false,
-        onChange: (value) => {
-            // Trigger a refresh so debug-only instrumentation can take effect immediately.
-            coreUpdate(value)
-        }
+        onChange: () => requestHudRefresh()
     })
 
     // Fail-visible action diagnostics for critical execution paths.
@@ -65,8 +59,6 @@ export function register (coreUpdate) {
         config: true,
         type: Boolean,
         default: true,
-        onChange: (value) => {
-            coreUpdate(value)
-        }
+        onChange: () => requestHudRefresh()
     })
 }

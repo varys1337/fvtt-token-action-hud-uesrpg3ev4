@@ -15,7 +15,7 @@ export const CORE_MODULE = {
 /**
  * Core module version required by the system module
  */
-export const REQUIRED_CORE_MODULE_VERSION = '2.1.1'
+export const REQUIRED_CORE_MODULE_VERSION = '2.1'
 
 /**
  * Action types
@@ -146,7 +146,7 @@ export const GROUP = {
     // "Magic Effects" is the UESRPG-facing label for actor ActiveEffects.
     activeEffects: { id: 'activeEffects', name: 'tokenActionHud.uesrpg3ev4.magicEffects', type: 'system' },
 
-    // Actions Tracker (non-clickable display only)
+    // Actions Tracker (manual document AP control)
     actionsTracker: { id: 'actionsTracker', name: 'tokenActionHud.uesrpg3ev4.actionsTracker', type: 'system' },
 
     // Resources (quick-access badges and dialogs)

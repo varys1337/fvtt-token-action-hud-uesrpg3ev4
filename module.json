@@ -10,11 +10,11 @@
     }
   ],
   "url": "https://github.com/varys1337/fvtt-token-action-hud-uesrpg3ev4",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "compatibility": {
-    "minimum": "14.359",
+    "minimum": "14.368",
     "verified": "14.360",
-    "maximum": "14.999"
+    "maximum": "14"
   },
   "esmodules": [
     "scripts/init.js"
@@ -37,14 +37,18 @@
       {
         "id": "uesrpg-3ev4",
         "type": "system",
-        "compatibility": {}
+        "compatibility": {
+          "minimum": "v14.3.1"
+        }
       }
     ],
     "requires": [
       {
         "id": "token-action-hud-core",
         "type": "module",
-        "compatibility": {}
+        "compatibility": {
+          "minimum": "2.1.2"
+        }
       }
     ],
     "optional": [],
@@ -52,8 +56,8 @@
       "optional": []
     }
   },
-  "manifest": "https://github.com/varys1337/fvtt-token-action-hud-uesrpg3ev4/releases/download/%25TAG%25/module.json",
-  "download": "https://github.com/varys1337/fvtt-token-action-hud-uesrpg3ev4/releases/download/%25TAG%25/module.zip",
+  "manifest": "https://github.com/varys1337/fvtt-token-action-hud-uesrpg3ev4/releases/latest/download/module.json",
+  "download": "https://github.com/varys1337/fvtt-token-action-hud-uesrpg3ev4/releases/download/v1.3.0/module.zip",
   "readme": "https://github.com/varys1337/fvtt-token-action-hud-uesrpg3ev4/blob/main/readme.md",
   "flags": {}
 }

@@ -1,108 +1,171 @@
-import { debugLog } from './utils.js'
+import { CORE_MODULE, MODULE } from './constants.js'
+import { hasChangedPath, sameDocument } from './utils.js'
 
 /**
- * Internal, conservative build cache.
- *
- * The cache is intentionally isolated to this system module and does NOT depend on Token Action HUD Core internals.
- * It is keyed by Token id (string) to respect token-local HUD state.
+ * Compatibility API: actions now derive directly from documents on each build.
+ * No action snapshots or document references are retained between builds.
+ * Invalidation intentionally does not request a render.
  */
-const _buildCache = new Map()
+export function invalidateBuildCacheByKey (_key) {}
+export function invalidateBuildCacheByActorId (_actorId) {}
+export function invalidateAllBuildCaches () {}
+export function getBuildCacheEntry (_key) { return null }
+export function setBuildCacheEntry (_key, _entry) {}
 
-/** @type {Map<string, Set<string>>} actorId -> Set<tokenId> */
-const _actorToCacheKeys = new Map()
+let _refreshTimer = null
+let _refreshHooksRegistered = false
+const _refreshTargets = new Set()
+let _unscopedRefreshRequested = false
 
-let _cacheHooksRegistered = false
-
-function _unindexCacheKey (key, actorId) {
-    if (!actorId) return
-    const set = _actorToCacheKeys.get(actorId)
-    if (!set) return
-    set.delete(key)
-    if (set.size === 0) _actorToCacheKeys.delete(actorId)
+function isHudBridgeActive () {
+    return game?.system?.id === 'uesrpg-3ev4'
+        && game.modules?.get(MODULE.ID)?.active === true
+        && game.modules?.get(CORE_MODULE.ID)?.active === true
 }
 
-export function invalidateBuildCacheByKey (key) {
-    if (!key) return
-    const entry = _buildCache.get(key)
-    if (entry) _unindexCacheKey(key, entry.actorId)
-    _buildCache.delete(key)
+function cancelHudRefresh () {
+    if (_refreshTimer !== null) clearTimeout(_refreshTimer)
+    _refreshTimer = null
+    _refreshTargets.clear()
+    _unscopedRefreshRequested = false
 }
 
-export function invalidateBuildCacheByActorId (actorId) {
-    if (!actorId) return
-    const keys = _actorToCacheKeys.get(actorId)
-    if (keys) {
-        for (const k of keys) _buildCache.delete(k)
-        _actorToCacheKeys.delete(actorId)
+/** Coalesce requests through Core's supported refresh hook after document hooks finish. */
+export function requestHudRefresh (...documents) {
+    if (!isHudBridgeActive() || !game?.tokenActionHud || !canvas?.ready) return
+    const targets = documents.filter(Boolean)
+    if (targets.length === 0) _unscopedRefreshRequested = true
+    else targets.forEach(document => _refreshTargets.add(document))
+    if (_refreshTimer !== null) return
+    _refreshTimer = setTimeout(() => {
+        const pendingTargets = Array.from(_refreshTargets)
+        const unscoped = _unscopedRefreshRequested
+        cancelHudRefresh()
+        if (!isHudBridgeActive() || !game?.tokenActionHud || !canvas?.ready) return
+        const context = getHudContext()
+        if (!unscoped && !pendingTargets.some(document => isRelevantDocument(document, context))) return
+        Hooks.callAll('forceUpdateTokenActionHud')
+    }, 0)
+}
+
+function getHudContext () {
+    const hud = game?.tokenActionHud
+    const manager = hud?.hudManager
+    if (!isHudBridgeActive() || !manager || !canvas?.ready) return null
+    const tokens = [
+        manager.token,
+        ...(Array.isArray(manager.tokens) ? manager.tokens : []),
+        ...(canvas.tokens?.controlled ?? [])
+    ].filter(Boolean).map(token => token.document ?? token)
+    const actors = [
+        manager.actor,
+        ...(Array.isArray(manager.actors) ? manager.actors : []),
+        ...tokens.map(token => token.actor)
+    ].filter(Boolean)
+    return { hud, tokens, actors }
+}
+
+function getOwningActor (document) {
+    let current = document?.document ?? document
+    while (current) {
+        const name = current.constructor?.documentName
+        if (name === 'Actor') return current
+        if (name === 'Token') return current.actor ?? null
+        current = current.parent
     }
+    return null
 }
 
-export function invalidateAllBuildCaches () {
-    _buildCache.clear()
-    _actorToCacheKeys.clear()
+function isRelevantActor (actor, context) {
+    if (!actor || !context) return false
+    return context.actors.some(current => sameDocument(current, actor)
+        || sameDocument(current.token?.baseActor, actor))
+        || context.tokens.some(token => sameDocument(token.baseActor, actor))
 }
 
-export function getBuildCacheEntry (key) {
-    if (!key) return null
-    return _buildCache.get(key) ?? null
-}
-
-export function setBuildCacheEntry (key, entry) {
-    if (!key || !entry) return
-    _buildCache.set(key, entry)
-    const actorId = entry.actorId
-    if (actorId) {
-        const set = _actorToCacheKeys.get(actorId) ?? new Set()
-        set.add(key)
-        _actorToCacheKeys.set(actorId, set)
+function isRelevantDocument (document, context) {
+    const doc = document?.document ?? document
+    if (!doc || !context) return false
+    if (doc.constructor?.documentName === 'Token') {
+        return context.tokens.some(token => sameDocument(token, doc))
     }
+    return isRelevantActor(getOwningActor(doc), context)
+}
+
+function supplementActorRefresh (actor, changes) {
+    const context = getHudContext()
+    if (!isRelevantActor(actor, context)) return
+    // Core 2.1.2 filters these hooks through its singular actor context.
+    if (context.hud.isValidActorOrItemUpdate?.(actor, changes) === true) return
+    requestHudRefresh(actor)
 }
 
 /**
- * Register conservative invalidation hooks.
- * This is safe to call multiple times.
+ * Supplement only the document events Core 2.1.2 omits or rejects for the active
+ * context. Core owns normal actor/item/selection/combat refreshes. This bridge
+ * never listens to render or forceUpdate hooks and never writes documents.
  */
+export function registerHudRefreshHooks () {
+    if (_refreshHooksRegistered) return
+    _refreshHooksRegistered = true
+
+    for (const name of ['updateActor', 'deleteActor']) {
+        Hooks.on(name, supplementActorRefresh)
+    }
+    for (const name of ['createItem', 'updateItem', 'deleteItem']) {
+        Hooks.on(name, item => supplementActorRefresh(getOwningActor(item)))
+    }
+
+    Hooks.on('updateActiveEffect', effect => {
+        const context = getHudContext()
+        if (isRelevantDocument(effect.target, context) || isRelevantDocument(effect.parent, context)) {
+            requestHudRefresh(effect.target, effect.parent)
+        }
+    })
+    for (const name of ['createActiveEffect', 'deleteActiveEffect']) {
+        Hooks.on(name, effect => {
+            const context = getHudContext()
+            if (!isRelevantDocument(effect.target, context) && !isRelevantDocument(effect.parent, context)) return
+            if (context.hud.isControlledActor?.(effect.parent) === true) return
+            requestHudRefresh(effect.target, effect.parent)
+        })
+    }
+
+    for (const name of ['createActorDelta', 'updateActorDelta', 'deleteActorDelta']) {
+        Hooks.on(name, delta => {
+            if (isRelevantDocument(delta.parent, getHudContext())) requestHudRefresh(delta.parent)
+        })
+    }
+
+    Hooks.on('updateToken', (token, changes) => {
+        const context = getHudContext()
+        if (!isRelevantDocument(token, context)) return
+        const relevant = ['name', 'actorId', 'actorLink', 'delta', 'hidden',
+            'flags.' + MODULE.ID, 'flags.uesrpg-3ev4', 'flags.uesrpg3ev4']
+        if (!relevant.some(path => hasChangedPath(changes, path))) return
+        // Core handles hidden updates itself, except when its flag filter rejects them.
+        if (Object.hasOwn(changes ?? {}, 'hidden')
+            && context.hud.isValidTokenChange?.(token, changes) === true) return
+        requestHudRefresh(token)
+    })
+
+    for (const name of ['createCombatant', 'deleteCombatant', 'updateCombatant']) {
+        Hooks.on(name, combatant => {
+            const context = getHudContext()
+            if (!isRelevantDocument(combatant.token, context) && !isRelevantActor(combatant.actor, context)) return
+            if (name === 'updateCombatant' && context.hud.isControlledActor?.(combatant.actor) === true) return
+            requestHudRefresh(combatant.token, combatant.actor)
+        })
+    }
+
+    Hooks.on('canvasTearDown', cancelHudRefresh)
+    Hooks.on('canvasReady', () => requestHudRefresh())
+    Hooks.on('closeApplicationV2', app => {
+        if (app === game?.tokenActionHud) cancelHudRefresh()
+    })
+}
+
+/** Compatibility alias for older module integrations. */
 export function registerBuildCacheInvalidationHooks () {
-    if (_cacheHooksRegistered) return
-    _cacheHooksRegistered = true
-
-    // Actor-level changes that can affect what appears on the HUD.
-    Hooks.on('updateActor', (actor) => invalidateBuildCacheByActorId(actor?.id))
-
-    // Item changes (inventory/spells/features) always imply a rebuild for the owning actor.
-    Hooks.on('createItem', (item) => invalidateBuildCacheByActorId(item?.parent?.id))
-    Hooks.on('updateItem', (item) => invalidateBuildCacheByActorId(item?.parent?.id))
-    Hooks.on('deleteItem', (item) => invalidateBuildCacheByActorId(item?.parent?.id))
-
-    // ActiveEffects can affect resources and action availability.
-    Hooks.on('createActiveEffect', (effect) => invalidateBuildCacheByActorId(effect?.parent?.id))
-    Hooks.on('updateActiveEffect', (effect) => invalidateBuildCacheByActorId(effect?.parent?.id))
-    Hooks.on('deleteActiveEffect', (effect) => invalidateBuildCacheByActorId(effect?.parent?.id))
-
-    // Token changes can affect token-local display.
-    Hooks.on('updateToken', (tokenDoc) => {
-        invalidateBuildCacheByKey(tokenDoc?.id)
-        invalidateBuildCacheByActorId(tokenDoc?.actorId)
-    })
-
-    // Selection changes can swap between tokens quickly.
-    Hooks.on('controlToken', (token) => invalidateBuildCacheByKey(token?.id))
-
-    // Conservative: combat updates can change turn-based availability.
-    Hooks.on('updateCombat', () => {
-        debugLog('Cache invalidated: updateCombat')
-        invalidateAllBuildCaches()
-    })
-
-    // System-specific hooks (guarded; only fire when the system emits them).
-    Hooks.on('uesrpg.timeChanged', () => {
-        debugLog('Cache invalidated: uesrpg.timeChanged')
-        invalidateAllBuildCaches()
-    })
-    Hooks.on('uesrpg.combatTimeChanged', () => {
-        debugLog('Cache invalidated: uesrpg.combatTimeChanged')
-        invalidateAllBuildCaches()
-    })
-    Hooks.on('uesrpgDamageApplied', (actor) => invalidateBuildCacheByActorId(actor?.id))
-    Hooks.on('uesrpgHealingApplied', (actor) => invalidateBuildCacheByActorId(actor?.id))
+    registerHudRefreshHooks()
 }

@@ -1,16 +1,29 @@
 import { MODULE } from './constants.js'
-import { isSupportedActor, diagLog } from './utils.js'
+import { canUpdateDocument, diagLog, escapeText, getStatusEffectConfigs, isSupportedActor, resolveActorToken, sameDocument } from './utils.js'
 import { SystemAdapter } from './system-adapter.js'
 
 export let RollHandler = null
 
+const ACTION_TYPES = new Set([
+    'attack', 'meleeWeaponAttack', 'rangedWeaponAttack', 'aim', 'castMagic', 'castEnchantment',
+    'dash', 'delay', 'disengage', 'hide', 'useItem', 'extinguishBurning', 'defensiveStance',
+    'opportunityAttack', 'specialAction', 'skill', 'profession', 'magicSkill', 'combatStyle',
+    'characteristic', 'weapon', 'armor', 'shield', 'item', 'container', 'ammunition', 'spell',
+    'scroll', 'languageEntry', 'factionEntry', 'manageLanguages', 'manageFactions', 'language',
+    'faction', 'talent', 'trait', 'power', 'secondaryAction', 'statusEffect', 'activeEffect',
+    'resources', 'utility', 'multiCombat', 'multiItem'
+])
+const SPATIAL_ACTION_TYPES = new Set([
+    'attack', 'meleeWeaponAttack', 'rangedWeaponAttack', 'aim', 'castMagic', 'dash', 'disengage',
+    'hide', 'useItem', 'extinguishBurning', 'defensiveStance', 'opportunityAttack', 'specialAction',
+    'secondaryAction', 'spell', 'scroll', 'multiCombat'
+])
 Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
     /**
      * Extends Token Action HUD Core's RollHandler class and handles action events triggered when an action is clicked
      */
     RollHandler = class RollHandler extends coreModule.api.RollHandler {
-        #itemSheetActionTypes = new Set(['weapon', 'armor', 'shield', 'item', 'container', 'ammunition', 'spell', 'scroll', 'talent', 'trait', 'power', 'skill', 'magicSkill', 'combatStyle', 'language', 'faction'])
-        #coreRenderableActionTypes = new Set(['skill', 'profession', 'magicSkill', 'combatStyle', 'weapon', 'armor', 'shield', 'item', 'container', 'ammunition', 'spell', 'scroll', 'language', 'faction'])
+        #itemSheetActionTypes = new Set(['weapon', 'armor', 'shield', 'item', 'container', 'ammunition', 'spell', 'scroll', 'skill', 'magicSkill', 'combatStyle', 'language', 'faction'])
 
         /**
          * Handle action click
@@ -20,117 +33,198 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {string} encodedValue The encoded value
          */
         async handleActionClick (event, encodedValue) {
-            let [actionTypeId, actionId] = encodedValue.split('|')
-            const aliases = {
-                delayAction: 'delay',
-                extinguish: 'extinguishBurning'
-            }
-            actionTypeId = aliases[actionTypeId] ?? actionTypeId
-            const isRightClick = event?.button === 2 || event?.type === 'contextmenu'
+            // Core does not await overrides. Contain every asynchronous failure here.
+            try {
+                const action = this.#resolveAction(encodedValue)
+                if (!action) return this.#warn('invalidAction')
+                const click = this.#snapshotEvent(event)
+                const selected = Array.from(canvas?.tokens?.controlled ?? [])
+                const contexts = selected
+                    .filter(token => isSupportedActor(token?.actor))
+                    .map(token => ({ actor: token.actor, token }))
+                const coreActor = this.actor
+                const coreToken = this.token
+                const assignedActor = game.user?.character ?? null
+                if (coreActor && !isSupportedActor(coreActor)) return
+                if (!selected.length && coreActor && !sameDocument(coreActor, assignedActor)) return this.#warn('selectionChanged')
+                if (selected.length !== contexts.length) return this.#warn(contexts.length ? 'invalidAction' : 'noSupportedTokens')
+                if (coreActor && selected.length && (contexts.length !== 1
+                    || !sameDocument(contexts[0].actor, coreActor)
+                    || (coreToken && !sameDocument(contexts[0].token, coreToken)))) return this.#warn('selectionChanged')
+                if (new Set(contexts.map(context => context.actor.type)).size > 1) return this.#warn('mixedActorTypes')
+                if (!coreActor && !contexts.length) return this.#warn('noSupportedTokens')
 
-            // We may not have this.actor in multi-token contexts; resolve controlled tokens once for safe fallbacks.
-            const selectedTokens = (canvas?.tokens?.controlled ?? [])
-            const controlledTokens = selectedTokens.filter((token) => isSupportedActor(token?.actor))
-
-            if (this.actor && !isSupportedActor(this.actor)) return
-
-            if (!this.actor && selectedTokens.length > 0 && controlledTokens.length === 0) {
-                this.#notifyDispatchIssue('No supported UESRPG tokens selected.', {
-                    actionTypeId,
-                    actionId,
-                    selected: selectedTokens.length,
-                    supported: controlledTokens.length
-                })
-                return
-            }
-
-            if (selectedTokens.length > controlledTokens.length) {
-                diagLog('Ignoring unsupported tokens', {
-                    selected: selectedTokens.length,
-                    supported: controlledTokens.length
-                })
-            }
-
-            if (!this.actor && controlledTokens.length === 0) {
-                return
-            }
-
-            if (controlledTokens.length > 1) {
-                const typeSet = new Set(controlledTokens.map(t => t?.actor?.type).filter(Boolean))
-                if (typeSet.size > 1) {
-                    ui.notifications?.warn?.('Mixed actor types selected. Please select only one type.')
-                    return
-                }
-            }
-
-            const actor = this.#getSingleContextActor(controlledTokens)
-
-            if (isRightClick) {
-                if (await this.#tryOpenItemSheet(actionTypeId, actionId, actor)) return
-            }
-
-            // Core render-item behavior must have a single actor context.
-            if (this.#coreRenderableActionTypes.has(actionTypeId) && this.isRenderItem()) {
-                if (actor && typeof this.renderItem === 'function') return this.renderItem(actor, actionId)
-                if (actor && typeof this.doRenderItem === 'function') return this.doRenderItem(actor, actionId)
-            }
-
-            // If single actor is selected
-            if (this.actor) {
-                await this.#handleAction(event, this.actor, this.token, actionTypeId, actionId)
-                return
-            }
-
-            // Multi-token execution actions (Attacks, Spells, Talents).
-            // These actions are built only when multiple tokens are selected.
-            if ((actionTypeId === 'multiCombat' || actionTypeId === 'multiItem') && controlledTokens.length > 1) {
-                const confirmed = await this.#confirmMultiTokenExecution(actionTypeId, actionId, controlledTokens.length)
-                if (!confirmed) return
-
-                for (const token of controlledTokens) {
-                    const actor = token.actor
-                    if (!actor) continue
-                    await this.#handleMultiTokenAction(event, actor, token, actionTypeId, actionId)
-                }
-                return
-            }
-
-            // Status effects need deterministic multi-token behavior.
-            // Left-click: toggle active state (all-or-none).
-            // Right-click: toggle overlay (visual) state (all-or-none) while ensuring the status is active.
-            if (actionTypeId === 'statusEffect' && controlledTokens.length > 1) {
-                if (isRightClick) {
-                    const icon = this.#getStatusEffectIcon(actionId)
-                    if (!icon) {
-                        ui.notifications?.warn(`No icon found for status effect: ${actionId}`)
-                        return
-                    }
-
-                    const allOverlay = controlledTokens.every(t => String(this.#getTokenOverlayEffect(t)) === String(icon))
-                    const desiredOverlay = !allOverlay
-
-                    for (const token of controlledTokens) {
-                        const actor = token.actor
-                        await this.#ensureStatusEffectActive(token, actor, actionId)
-                        await this.#setTokenOverlayEffect(token, icon, desiredOverlay)
-                    }
+                const { actionTypeId, actionId } = action
+                if (actionTypeId === 'statusEffect' && this.#isRightClick(click)) {
+                    if (selected.length !== 1 || contexts.length !== 1) return this.#warn('selectOneTokenForStatus')
+                    await canvas.hud.token.bind(contexts[0].token)
                     return
                 }
 
-                const allHave = controlledTokens.every(t => t?.document?.hasStatusEffect ? t.document.hasStatusEffect(actionId) : false)
-                const desiredActive = !allHave
-                for (const token of controlledTokens) {
-                    const actor = token.actor
-                    await this.#handleStatusEffectAction(event, token, actor, actionId, desiredActive)
+                const single = contexts.length === 1
+                    ? contexts[0]
+                    : coreActor ? { actor: assignedActor, token: resolveActorToken(assignedActor) } : null
+                if (single && this.#isSheetRequest(click)) {
+                    if (await this.#tryOpenItemSheet(actionTypeId, actionId, single.actor)) return
                 }
-                return
-            }
 
-            // If multiple actors are selected
-            for (const token of controlledTokens) {
-                const actor = token.actor
-                await this.#handleAction(event, actor, token, actionTypeId, actionId)
+                const shared = actionTypeId === 'multiCombat' || actionTypeId === 'multiItem'
+                if (contexts.length > 1 && !shared && actionTypeId !== 'statusEffect') return this.#warn('invalidAction')
+                const spatial = SPATIAL_ACTION_TYPES.has(actionTypeId) || (actionTypeId === 'multiItem' && actionId.startsWith('spell~'))
+                if (spatial && this.#hasDuplicateActors(contexts)) return this.#warn('ambiguousSpatialSelection')
+                let sharedMode = null
+                let sharedTargets = null
+                if (shared) {
+                    if (contexts.length < 2) return this.#warn('invalidAction')
+                    if (!['intersection', 'union'].includes(game.settings.get(MODULE.ID, 'multiTokenItemExecutionMode'))) return this.#warn('invalidAction')
+                    const confirmed = await this.#confirmMultiTokenExecution(actionTypeId, actionId, contexts.length)
+                    if (!confirmed) return
+                    if (!this.#selectionMatches(selected, contexts)) return this.#warn('selectionChanged')
+                    sharedMode = game.settings.get(MODULE.ID, 'multiTokenItemExecutionMode')
+                    sharedTargets = this.#preflightSharedAction(contexts, actionTypeId, actionId, sharedMode)
+                    if (!sharedTargets?.length) return
+                }
+
+                let targets = shared ? sharedTargets : !single ? contexts : [single]
+                if (!spatial) targets = this.#uniqueActorContexts(targets)
+                const desiredActive = actionTypeId === 'statusEffect'
+                    ? !targets.every(context => this.#hasStatusEffect(context.actor, actionId))
+                    : null
+                let failed = 0
+                for (let index = 0; index < targets.length; index++) {
+                    const context = targets[index]
+                    if (shared) {
+                        if (!this.#selectionMatches(selected, contexts)
+                            || game.settings.get(MODULE.ID, 'multiTokenItemExecutionMode') !== sharedMode) return this.#warn('selectionChanged')
+                        if (sharedMode === 'intersection'
+                            && !this.#preflightSharedAction(targets.slice(index), actionTypeId, actionId, sharedMode)) return
+                    }
+                    try {
+                        const actor = context.token?.actor ?? context.actor
+                        if (!sameDocument(actor, context.actor)) throw new Error('HUD actor/token context changed')
+                        if (shared) {
+                            await this.#handleMultiTokenAction(click, actor, context.token, actionTypeId, actionId)
+                        } else if (actionTypeId === 'statusEffect') {
+                            await this.#handleStatusEffectAction(click, context.token, actor, actionId, desiredActive)
+                        } else {
+                            await this.#handleAction(click, actor, context.token, actionTypeId, actionId)
+                        }
+                    } catch (error) {
+                        if (targets.length === 1) throw error
+                        failed++
+                        console.error(`${MODULE.ID} | HUD action failed`, { actorUuid: context.actor?.uuid, actionTypeId, actionId, error })
+                    }
+                }
+                if (failed) this.#warn('multiActionFailed', { count: failed })
+            } catch (error) {
+                console.error(`${MODULE.ID} | HUD action failed`, error)
+                this.#warn('actionFailed')
             }
+        }
+
+        #resolveAction (encodedValue) {
+            let actionTypeId
+            let actionId
+            const metadata = this.action?.system
+            if (metadata && (Object.hasOwn(metadata, 'actionTypeId') || Object.hasOwn(metadata, 'actionId'))) {
+                actionTypeId = metadata.actionTypeId
+                actionId = metadata.actionId
+            } else {
+                if (typeof encodedValue !== 'string') return null
+                const parts = encodedValue.split('|')
+                if (parts.length !== 2) return null
+                actionTypeId = parts[0]
+                actionId = parts[1]
+            }
+            if (typeof actionTypeId !== 'string' || typeof actionId !== 'string' || !actionId) return null
+            actionTypeId = actionTypeId.replace(/^tokenActionHud\.uesrpg3ev4\./, '')
+            actionTypeId = ({ delayAction: 'delay', extinguish: 'extinguishBurning' })[actionTypeId] ?? actionTypeId
+            if (!ACTION_TYPES.has(actionTypeId)) return null
+            if (actionTypeId === 'multiCombat' && !['attack~melee', 'attack~ranged'].includes(actionId)) return null
+            if (actionTypeId === 'multiItem' && !this.#parseSharedItem(actionId)) return null
+            return { actionTypeId, actionId }
+        }
+
+        #snapshotEvent (event) {
+            return Object.freeze({
+                originalEvent: event,
+                type: event?.type ?? 'click',
+                button: event?.button ?? (this.isRightClick ? 2 : 0),
+                shiftKey: Boolean(event?.shiftKey ?? this.isShift),
+                altKey: Boolean(event?.altKey ?? this.isAlt),
+                ctrlKey: Boolean(event?.ctrlKey ?? this.isCtrl),
+                metaKey: Boolean(event?.metaKey),
+                target: event?.target ?? null,
+                currentTarget: event?.currentTarget ?? null,
+                preventDefault: () => event?.preventDefault?.(),
+                stopPropagation: () => event?.stopPropagation?.()
+            })
+        }
+
+        #isRightClick (event) {
+            return event?.button === 2 || event?.type === 'contextmenu'
+        }
+
+        #isSheetRequest (event) {
+            return this.#isRightClick(event) && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey
+        }
+
+        #warn (key, data = {}) {
+            ui.notifications?.warn?.(game.i18n.format(`tokenActionHud.uesrpg3ev4.${key}`, data))
+        }
+
+        #uniqueActorContexts (contexts) {
+            return contexts.filter((context, index) => !contexts.slice(0, index).some(previous => sameDocument(previous.actor, context.actor)))
+        }
+
+        #hasDuplicateActors (contexts) {
+            return this.#uniqueActorContexts(contexts).length !== contexts.length
+        }
+
+        #selectionMatches (selected, contexts) {
+            const current = Array.from(canvas?.tokens?.controlled ?? [])
+            return selected.length === current.length
+                && selected.every(token => current.some(candidate => sameDocument(candidate, token)))
+                && contexts.every(context => sameDocument(context.token.actor, context.actor))
+        }
+
+        #getSharedItemMatches (actor, shared) {
+            return actor.items?.filter(item => item.type === shared.itemType
+                && String(item.name ?? '').trim().toLowerCase() === shared.nameKey
+                && (shared.itemType !== 'talent' || item.system?.activation?.enabled === true)) ?? []
+        }
+
+        #getSharedWeapon (actor, mode) {
+            return actor.items?.find(item => item.type === 'weapon' && item.system?.equipped === true
+                && (mode === 'ranged' ? item.system?.attackMode === 'ranged' : item.system?.attackMode !== 'ranged')) ?? null
+        }
+
+        #preflightSharedAction (contexts, actionTypeId, actionId, mode) {
+            if (!['intersection', 'union'].includes(mode)) {
+                this.#warn('invalidAction')
+                return null
+            }
+            const sharedItem = actionTypeId === 'multiItem' ? this.#parseSharedItem(actionId) : null
+            const weaponMode = actionTypeId === 'multiCombat' ? actionId.slice(actionId.indexOf('~') + 1) : null
+            const eligible = []
+            for (const context of contexts) {
+                const actor = context.token?.actor ?? context.actor
+                if (!sameDocument(actor, context.actor)) {
+                    this.#warn('selectionChanged')
+                    return null
+                }
+                const count = sharedItem ? this.#getSharedItemMatches(actor, sharedItem).length : Number(Boolean(this.#getSharedWeapon(actor, weaponMode)))
+                if (count > 1 && mode === 'union') this.#warn('ambiguousSharedItem')
+                if (count !== 1 || !canUpdateDocument(actor)) {
+                    if (mode === 'intersection') {
+                        this.#warn(count === 1 ? 'permissionDenied' : count > 1 ? 'ambiguousSharedItem' : 'invalidAction')
+                        return null
+                    }
+                    continue
+                }
+                eligible.push({ actor, token: context.token })
+            }
+            return eligible
         }
 
         /**
@@ -178,18 +272,6 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
         }
 
         /**
-         * Resolve the single actor context used for render-item and sheet-open flows.
-         * @private
-         * @param {Token[]} controlledTokens
-         * @returns {Actor|null}
-         */
-        #getSingleContextActor (controlledTokens = []) {
-            if (this.actor) return this.actor
-            if (controlledTokens.length === 1) return controlledTokens[0]?.actor ?? null
-            return null
-        }
-
-        /**
          * Open an embedded item sheet when the action type maps to a real actor item.
          * Synthetic HUD actions intentionally do not pass through this path.
          * @private
@@ -201,72 +283,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
         async #tryOpenItemSheet (actionTypeId, actionId, actor) {
             if (!this.#itemSheetActionTypes.has(actionTypeId) || !actor?.items?.get) return false
             const item = actor.items.get(actionId)
-            if (item?.sheet && typeof item.sheet.render === 'function') {
-                item.sheet.render(true)
-                return true
-            }
-            return false
-        }
-
-        /**
-         * Build a synthetic target-like object with a dataset payload.
-         * @private
-         * @param {object} dataset
-         * @returns {object}
-         */
-        #makeSyntheticTarget (dataset = {}) {
-            return { dataset: { ...(dataset ?? {}) } }
-        }
-
-        /**
-         * Build a synthetic action event with a dataset payload.
-         * @private
-         * @param {object} dataset
-         * @param {object} [opts]
-         * @returns {Event}
-         */
-        #makeActionEvent (dataset = {}, opts = {}) {
-            const target = this.#makeSyntheticTarget(dataset)
-            const fakeEvent = new MouseEvent('click', {
-                bubbles: true,
-                cancelable: true,
-                view: window,
-                shiftKey: opts?.shiftKey || false
-            })
-
-            Object.defineProperty(fakeEvent, 'currentTarget', {
-                writable: false,
-                value: target
-            })
-
-            return { event: fakeEvent, target }
-        }
-
-        /**
-         * Build a synthetic item click event for roll handlers that call .closest('.item').
-         * @private
-         * @param {string} itemId
-         * @param {object} [opts]
-         * @returns {Event}
-         */
-        #makeItemEvent (itemId, opts = {}) {
-            const target = {
-                ...this.#makeSyntheticTarget({ itemId }),
-                closest: () => ({ dataset: { itemId } })
-            }
-            const fakeEvent = new MouseEvent('click', {
-                bubbles: true,
-                cancelable: true,
-                view: window,
-                shiftKey: opts?.shiftKey || false
-            })
-
-            Object.defineProperty(fakeEvent, 'currentTarget', {
-                writable: false,
-                value: target
-            })
-
-            return { event: fakeEvent, target }
+            if (!item) return false
+            const result = await SystemAdapter.openDocumentSheet({ document: item })
+            return result.ok === true
         }
 
         /**
@@ -274,6 +293,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @private
          */
         async #callCombatQuickAction (actor, token, dataset, eventOverrides = {}) {
+            if (!canUpdateDocument(actor)) return this.#warn('permissionDenied')
             const normalizedDataset = {
                 ...(dataset ?? {}),
                 combatAction: dataset?.combatAction ?? dataset?.action ?? '',
@@ -309,6 +329,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @private
          */
         async #callCastMagicAction (actor, token, preselectedSpell = null, eventOverrides = {}) {
+            if (!canUpdateDocument(actor)) return this.#warn('permissionDenied')
             const res = await SystemAdapter.executeCastMagic({
                 actor,
                 token,
@@ -381,49 +402,49 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
         async #handleAction (event, actor, token, actionTypeId, actionId) {
             switch (actionTypeId) {
             case 'attack':
-                await this.#handleAttackAction(event, actor, actionId)
+                await this.#handleAttackAction(event, actor, actionId, token)
                 break
             case 'meleeWeaponAttack':
-                await this.#handleWeaponAttackAction(event, actor, actionId)
+                await this.#handleWeaponAttackAction(event, actor, actionId, token)
                 break
             case 'rangedWeaponAttack':
-                await this.#handleWeaponAttackAction(event, actor, actionId)
+                await this.#handleWeaponAttackAction(event, actor, actionId, token)
                 break
             case 'aim':
-                await this.#handleAimAction(event, actor)
+                await this.#handleAimAction(event, actor, token)
                 break
             case 'castMagic':
-                await this.#handleCastMagicAction(event, actor, actionId)
+                await this.#handleCastMagicAction(event, actor, actionId, token)
                 break
             case 'castEnchantment':
-                await this.#handleCastEnchantmentAction(event, actor, actionId)
+                await this.#handleCastEnchantmentAction(event, actor, actionId, token)
                 break
             case 'dash':
-                await this.#handleDashAction(event, actor)
+                await this.#handleDashAction(event, actor, token)
                 break
             case 'delay':
-                await this.#handleDelayAction(event, actor)
+                await this.#handleDelayAction(event, actor, token)
                 break
             case 'disengage':
-                await this.#handleDisengageAction(event, actor)
+                await this.#handleDisengageAction(event, actor, token)
                 break
             case 'hide':
-                await this.#handleHideAction(event, actor)
+                await this.#handleHideAction(event, actor, token)
                 break
             case 'useItem':
-                await this.#handleUseItemAction(event, actor)
+                await this.#handleUseItemAction(event, actor, token)
                 break
             case 'extinguishBurning':
-                await this.#handleExtinguishBurningAction(event, actor)
+                await this.#handleExtinguishBurningAction(event, actor, token)
                 break
             case 'defensiveStance':
-                await this.#handleDefensiveStanceAction(event, actor)
+                await this.#handleDefensiveStanceAction(event, actor, token)
                 break
             case 'opportunityAttack':
-                await this.#handleOpportunityAttackAction(event, actor)
+                await this.#handleOpportunityAttackAction(event, actor, token)
                 break
             case 'specialAction':
-                await this.#handleSpecialAction(event, actor, actionId)
+                await this.#handleSpecialAction(event, actor, actionId, token)
                 break
             case 'skill':
                 await this.#handleSkillAction(event, actor, actionId)
@@ -441,46 +462,34 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 await this.#handleCharacteristicAction(event, actor, actionId)
                 break
             case 'weapon':
-                await this.#handleWeaponAction(event, actor, actionId)
-                break
             case 'armor':
-                await this.#handleArmorAction(event, actor, actionId)
-                break
             case 'shield':
-                await this.#handleShieldAction(event, actor, actionId)
-                break
             case 'item':
-                await this.#handleItemAction(event, actor, actionId)
+            case 'ammunition':
+                await this.#handleEquipmentAction(event, actor, actionId)
                 break
             case 'container':
                 await this.#handleContainerAction(event, actor, actionId)
                 break
-            case 'ammunition':
-                await this.#handleAmmunitionAction(event, actor, actionId)
-                break
             case 'spell':
-                await this.#handleSpellAction(event, actor, actionId)
+                await this.#handleSpellAction(event, actor, actionId, token)
                 break
             case 'scroll':
-                await this.#handleScrollAction(event, actor, actionId)
+                await this.#handleScrollAction(event, actor, actionId, token)
                 break
             case 'languageEntry':
-                await this.#handleLanguageEntryAction(event, actor, actionId)
+                await this.#handleSocialAction(actor, 'language', actionId)
                 break
             case 'factionEntry':
-                await this.#handleFactionEntryAction(event, actor, actionId)
+                await this.#handleSocialAction(actor, 'faction', actionId)
                 break
             case 'manageLanguages':
-                await this.#handleManageLanguagesAction(actor)
+            case 'language':
+                await this.#handleSocialAction(actor, 'language')
                 break
             case 'manageFactions':
-                await this.#handleManageFactionsAction(actor)
-                break
-            case 'language':
-                await this.#handleLanguageAction(event, actor, actionId)
-                break
             case 'faction':
-                await this.#handleFactionAction(event, actor, actionId)
+                await this.#handleSocialAction(actor, 'faction')
                 break
             case 'talent':
             case 'trait':
@@ -488,7 +497,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 await this.#handleFeatureAction(event, actor, actionId)
                 break
             case 'secondaryAction':
-                await this.#handleSecondaryActionAction(event, actor, actionId)
+                await this.#handleSecondaryActionAction(event, actor, actionId, token)
                 break
             case 'statusEffect':
                 await this.#handleStatusEffectAction(event, token, actor, actionId)
@@ -522,20 +531,15 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @returns {Promise<boolean>}
          */
         async #confirmMultiTokenExecution (actionTypeId, actionId, count) {
-            try {
-                const label = this.#describeMultiTokenAction(actionTypeId, actionId)
-                const content = `<p>Execute <strong>${label}</strong> for <strong>${count}</strong> selected tokens?</p>`
-                return await Dialog.confirm({
-                    title: 'Confirm Multi-Token Execution',
-                    content,
-                    yes: () => true,
-                    no: () => false,
-                    defaultYes: false
-                })
-            } catch (error) {
-                console.warn(`${MODULE.ID} | Multi-token confirm failed, defaulting to cancel`, error)
-                return false
-            }
+            const label = this.#describeMultiTokenAction(actionTypeId, actionId)
+            const result = await foundry.applications.api.DialogV2.confirm({
+                window: { title: game.i18n.localize('tokenActionHud.uesrpg3ev4.confirmMultiTitle') },
+                content: `<p>${game.i18n.format('tokenActionHud.uesrpg3ev4.confirmMultiContent', { action: escapeText(label), count })}</p>`,
+                yes: { default: false },
+                no: { default: true },
+                rejectClose: false
+            })
+            return result === true
         }
 
         /**
@@ -554,16 +558,25 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             }
 
             if (actionTypeId === 'multiItem') {
-                const [itemType, nameKeyEnc] = String(actionId ?? '').split('~')
-                let nameKey = nameKeyEnc
-                try { nameKey = decodeURIComponent(nameKeyEnc) } catch (e) {}
-
-                if (itemType === 'spell') return `Cast shared spell: ${nameKey}`
-                if (itemType === 'talent') return `Use shared talent: ${nameKey}`
-                return `Item: ${nameKey}`
+                const shared = this.#parseSharedItem(actionId)
+                if (!shared) return game.i18n.localize('tokenActionHud.uesrpg3ev4.unsupportedAction')
+                return shared.itemType === 'spell' ? `Cast shared spell: ${shared.nameKey}` : `Use shared talent: ${shared.nameKey}`
             }
 
             return 'Action'
+        }
+
+        #parseSharedItem (actionId) {
+            const separator = actionId.indexOf('~')
+            if (separator < 1) return null
+            const itemType = actionId.slice(0, separator)
+            if (!['spell', 'talent'].includes(itemType)) return null
+            try {
+                const nameKey = decodeURIComponent(actionId.slice(separator + 1)).trim().toLowerCase()
+                return nameKey ? { itemType, nameKey } : null
+            } catch {
+                return null
+            }
         }
 
         /**
@@ -581,32 +594,28 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             if (actionTypeId === 'multiCombat') {
                 const [cmd, arg] = String(actionId ?? '').split('~')
                 if (cmd === 'attack' && (arg === 'melee' || arg === 'ranged')) {
-                    const mode = arg
-                    const weapon = actor.items?.find?.(i =>
-                        i.type === 'weapon' &&
-                        i.system?.equipped === true &&
-                        (mode === 'ranged'
-                            ? String(i.system?.attackMode ?? '') === 'ranged'
-                            : String(i.system?.attackMode ?? '') !== 'ranged')
-                    ) ?? null
+                    const weapon = this.#getSharedWeapon(actor, arg)
                     if (!weapon) return
-                    await this.#handleAttackAction(event, actor, weapon.id ?? weapon._id ?? arg)
+                    await this.#handleAttackAction(event, actor, weapon.id ?? arg, token)
                 }
                 return
             }
 
             if (actionTypeId === 'multiItem') {
-                const [itemType, nameKeyEnc] = String(actionId ?? '').split('~')
-                let nameKey = nameKeyEnc
-                try { nameKey = decodeURIComponent(nameKeyEnc) } catch (e) {}
-                nameKey = String(nameKey ?? '').trim().toLowerCase()
-                if (!itemType || !nameKey) return
+                const shared = this.#parseSharedItem(actionId)
+                if (!shared) return this.#warn('invalidAction')
+                const { itemType, nameKey } = shared
 
-                const item = actor.items?.find(i => i.type === itemType && String(i.name ?? '').trim().toLowerCase() === nameKey)
-                if (!item) return
+                const matches = this.#getSharedItemMatches(actor, { itemType, nameKey })
+                if (!matches.length) return
+                if (matches.length !== 1) {
+                    this.#warn('ambiguousSharedItem')
+                    return
+                }
+                const item = matches[0]
 
                 if (itemType === 'spell') {
-                    await this.#handleSpellAction(event, actor, item.id)
+                    await this.#handleSpellAction(event, actor, item.id, token)
                     return
                 }
 
@@ -617,119 +626,17 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             }
         }
 
-        /**
-         * Resolve the icon path for a Foundry status effect id.
-         * @private
-         * @param {string} statusId
-         * @returns {string|null}
-         */
-        #getStatusEffectIcon (statusId) {
-            const effects = Array.isArray(CONFIG?.statusEffects) ? CONFIG.statusEffects : []
-            const found = effects.find(e => String(e?.id ?? '') === String(statusId))
-            // Prefer "img" (v13) while supporting legacy "icon".
-            const img = found?.img ?? found?.icon
-            return img ? String(img) : null
+        #hasStatusEffect (actor, statusId) {
+            return actor?.statuses?.has(statusId) === true
         }
 
-
-        /**
-         * Read the current Token overlay effect path without using deprecated accessors.
-         * @private
-         * @param {Token} token
-         * @returns {string}
-         */
-        #getTokenOverlayEffect (token) {
-            const doc = token?.document
-            // Avoid TokenDocument#overlayEffect getter (deprecated). Read from source instead.
-            const src = doc?._source
-            const overlay = src && typeof src.overlayEffect === 'string' ? src.overlayEffect : ''
-            return String(overlay || '')
-        }
-
-        /**
-         * Ensure a Foundry status effect is active on the actor/token.
-         * @private
-         * @param {Token} token
-         * @param {Actor} actor
-         * @param {string} statusId
-         */
-        async #ensureStatusEffectActive (token, actor, statusId) {
-            if (!actor || !statusId) return
-            const has = token?.document?.hasStatusEffect ? token.document.hasStatusEffect(statusId) : false
-            if (has) return
-            try {
-                await actor.toggleStatusEffect(statusId, { active: true })
-            } catch (error) {
-                console.error(`${MODULE.ID} | Failed ensuring status effect active`, { statusId, error })
-            }
-        }
-
-        /**
-         * Set or clear a token overlay effect (visual only).
-         * Uses Token#toggleEffect when available; falls back to TokenDocument update.
-         * @private
-         * @param {Token} token
-         * @param {string} icon
-         * @param {boolean} desired
-         */
-        async #setTokenOverlayEffect (token, icon, desired) {
-            if (!token || !icon) return
-            const doc = token.document
-            if (!doc || typeof doc.update !== 'function') return
-
-            // Read current overlay without deprecated accessors.
-            const current = this.#getTokenOverlayEffect(token)
-            const want = desired ? String(icon) : ''
-
-            // No-op if already in desired state.
-            if ((desired && String(current) === want) || (!desired && String(current) === '')) return
-
-            try {
-                // TokenDocument.overlayEffect is a StringField and is not nullable; clear using an empty string.
-                await doc.update({ overlayEffect: want })
-            } catch (error) {
-                console.error(`${MODULE.ID} | Failed setting overlay effect`, { icon, desired, error })
-            }
-        }
-
-        /**
-         * Status effect behavior:
-         * - Left-click toggles active state.
-         * - Right-click toggles the overlay (visual) state while ensuring the status is active.
-         * @private
-         * @param {MouseEvent} event
-         * @param {Token} token
-         * @param {Actor} actor
-         * @param {string} statusId
-         * @param {boolean|null} forceActive
-         */
+        /** Toggle active status through the documented Actor API. Native TokenHUD owns overlays. */
         async #handleStatusEffectAction (event, token, actor, statusId, forceActive = null) {
             if (!actor || !statusId) return
-
-            const isRightClick = event?.button === 2 || event?.type === 'contextmenu'
-            if (isRightClick) {
-                const icon = this.#getStatusEffectIcon(statusId)
-                if (!icon) {
-                    ui.notifications?.warn(`No icon found for status effect: ${statusId}`)
-                    return
-                }
-
-                // Ensure status is active; then toggle overlay.
-                await this.#ensureStatusEffectActive(token, actor, statusId)
-                const current = String(this.#getTokenOverlayEffect(token))
-                const desiredOverlay = current !== String(icon)
-                await this.#setTokenOverlayEffect(token, icon, desiredOverlay)
-                return
-            }
-
-            try {
-                const has = token?.document?.hasStatusEffect ? token.document.hasStatusEffect(statusId) : false
-                const desired = typeof forceActive === 'boolean' ? forceActive : !has
-                await actor.toggleStatusEffect(statusId, { active: desired })
-            } catch (error) {
-                console.error(`${MODULE.ID} | Failed toggling status effect`, { statusId, error })
-                ui.notifications?.warn(`Unable to toggle status effect: ${statusId}`)
-            }
+            if (!canUpdateDocument(actor)) return this.#warn('permissionDenied')
+            if (!getStatusEffectConfigs().some(effect => effect.id === statusId)) return this.#warn('invalidAction')
+            const active = typeof forceActive === 'boolean' ? forceActive : !this.#hasStatusEffect(actor, statusId)
+            await actor.toggleStatusEffect(statusId, { active })
         }
 
         /**
@@ -740,16 +647,10 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          */
         async #handleActiveEffectAction (actor, effectId) {
             if (!actor || !effectId) return
-            try {
-                const effects = actor.effects ?? []
-                const effect = typeof effects.get === 'function' ? effects.get(effectId) : Array.from(effects).find(e => e?.id === effectId)
-                if (!effect) return
-                const disabled = effect.disabled === true
-                await effect.update({ disabled: !disabled })
-            } catch (error) {
-                console.error(`${MODULE.ID} | Failed toggling active effect`, { effectId, error })
-                ui.notifications?.warn('Unable to toggle Active Effect')
-            }
+            const effect = actor.effects?.get(effectId)
+            if (!effect) return this.#warn('invalidAction')
+            if (!canUpdateDocument(effect)) return this.#warn('permissionDenied')
+            await effect.update({ disabled: effect.disabled !== true })
         }
 
         /**
@@ -759,47 +660,22 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {object} actor    The actor
          * @param {string} actionId The action id (melee or ranged)
          */
-        async #handleAttackAction (event, actor, actionId) {
-            try {
-                // Resolve weapon from actionId (preferred), fallback to equipped by mode for legacy action ids.
-                let weapon = actor?.items?.get?.(actionId) ?? null
-                let label = game.i18n.localize('tokenActionHud.uesrpg3ev4.attack')
-
-                if (!weapon) {
-                    const attackMode = actionId === 'melee' ? 'melee' : 'ranged'
-                    weapon = actor.items.find(item =>
-                        item.type === 'weapon' &&
-                        item.system?.equipped &&
-                        item.system?.attackMode === attackMode
-                    )
-                    label = attackMode === 'melee'
-                        ? game.i18n.localize('tokenActionHud.uesrpg3ev4.attackMelee')
-                        : game.i18n.localize('tokenActionHud.uesrpg3ev4.attackRanged')
-                }
-
-                if (!weapon) {
-                    ui.notifications.warn('No equipped weapon found for this attack.')
-                    return
-                }
-
-                const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
-                if (!token) {
-                    ui.notifications.warn('No attacker token found. Select your token and try again.')
-                    return
-                }
-
-                // Prefer system combat quick action handler for parity with sheets.
-                const weaponId = weapon?.id ?? weapon?._id ?? actionId
-                await this.#callCombatQuickAction(actor, token, {
-                    combatAction: 'attack',
-                    action: 'attack',
-                    weaponId,
-                    label
-                })
-            } catch (error) {
-                console.error(`${MODULE.ID} | Error handling attack action`, error)
-                ui.notifications.error('Failed to execute attack. See console for details.')
+        async #handleAttackAction (event, actor, actionId, token) {
+            let weapon = actor.items?.get(actionId) ?? null
+            // Only the two recognized legacy mode IDs may select an equipped weapon.
+            if (!weapon && (actionId === 'melee' || actionId === 'ranged')) {
+                weapon = actor.items?.find(item => item.type === 'weapon'
+                    && item.system?.equipped === true
+                    && (actionId === 'ranged' ? item.system?.attackMode === 'ranged' : item.system?.attackMode !== 'ranged'))
             }
+            if (!weapon || weapon.type !== 'weapon' || weapon.system?.equipped !== true) return this.#warn('invalidAction')
+            if (token && !resolveActorToken(actor, token)) return this.#warn('invalidAction')
+            await this.#callCombatQuickAction(actor, token, {
+                combatAction: 'attack',
+                action: 'attack',
+                weaponId: weapon.id,
+                label: game.i18n.localize('tokenActionHud.uesrpg3ev4.attack')
+            }, { shiftKey: event.shiftKey })
         }
 
         /**
@@ -809,8 +685,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {object} actor
          * @param {string} actionId
          */
-        async #handleWeaponAttackAction (event, actor, actionId) {
-            await this.#handleAttackAction(event, actor, actionId)
+        async #handleWeaponAttackAction (event, actor, actionId, token) {
+            await this.#handleAttackAction(event, actor, actionId, token)
         }
 
         /**
@@ -819,9 +695,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {object} event The event
          * @param {object} actor The actor
          */
-        async #handleAimAction (event, actor) {
-            const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
-            await this.#callCombatQuickAction(actor, token, { combatAction: 'aim', action: 'aim', label: 'Aim' })
+        async #handleAimAction (event, actor, token) {
+            await this.#callCombatQuickAction(actor, token, { combatAction: 'aim', action: 'aim', label: 'Aim' }, { shiftKey: event.shiftKey })
         }
 
         /**
@@ -830,15 +705,10 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {object} event The event
          * @param {object} actor The actor
          */
-        async #handleCastMagicAction (event, actor, actionId = 'cast') {
-            try {
-                const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
-                const castActionType = String(actionId ?? '').toLowerCase() === 'instant' ? 'secondary' : 'primary'
-                await this.#callCastMagicAction(actor, token, null, { shiftKey: event?.shiftKey, castActionType })
-            } catch (error) {
-                console.error(`${MODULE.ID} | Error handling cast magic action`, error)
-                ui.notifications.error('Failed to open spell selection')
-            }
+        async #handleCastMagicAction (event, actor, actionId, token) {
+            if (!['cast', 'instant'].includes(actionId)) return this.#warn('invalidAction')
+            const castActionType = actionId === 'instant' ? 'secondary' : 'primary'
+            await this.#callCastMagicAction(actor, token, null, { shiftKey: event.shiftKey, castActionType })
         }
 
         /**
@@ -847,9 +717,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {object} event The event
          * @param {object} actor The actor
          */
-        async #handleDashAction (event, actor) {
-            const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
-            await this.#callCombatQuickAction(actor, token, { combatAction: 'dash', action: 'dash', label: 'Dash' })
+        async #handleDashAction (event, actor, token) {
+            await this.#callCombatQuickAction(actor, token, { combatAction: 'dash', action: 'dash', label: 'Dash' }, { shiftKey: event.shiftKey })
         }
 
         /**
@@ -858,9 +727,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {object} event The event
          * @param {object} actor The actor
          */
-        async #handleDelayAction (event, actor) {
-            const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
-            await this.#callCombatQuickAction(actor, token, { combatAction: 'delay', action: 'delay', label: 'Delay' })
+        async #handleDelayAction (event, actor, token) {
+            await this.#callCombatQuickAction(actor, token, { combatAction: 'delay', action: 'delay', label: 'Delay' }, { shiftKey: event.shiftKey })
         }
 
         /**
@@ -869,9 +737,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {object} event The event
          * @param {object} actor The actor
          */
-        async #handleDisengageAction (event, actor) {
-            const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
-            await this.#callCombatQuickAction(actor, token, { combatAction: 'disengage', action: 'disengage', label: 'Disengage' })
+        async #handleDisengageAction (event, actor, token) {
+            await this.#callCombatQuickAction(actor, token, { combatAction: 'disengage', action: 'disengage', label: 'Disengage' }, { shiftKey: event.shiftKey })
         }
 
         /**
@@ -880,9 +747,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {object} event The event
          * @param {object} actor The actor
          */
-        async #handleHideAction (event, actor) {
-            const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
-            await this.#callCombatQuickAction(actor, token, { combatAction: 'hide', action: 'hide', label: 'Hide' })
+        async #handleHideAction (event, actor, token) {
+            await this.#callCombatQuickAction(actor, token, { combatAction: 'hide', action: 'hide', label: 'Hide' }, { shiftKey: event.shiftKey })
         }
 
         /**
@@ -891,9 +757,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {object} event The event
          * @param {object} actor The actor
          */
-        async #handleUseItemAction (event, actor) {
-            const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
-            await this.#callCombatQuickAction(actor, token, { combatAction: 'use-item', action: 'use-item', label: 'Use Item' })
+        async #handleUseItemAction (event, actor, token) {
+            await this.#callCombatQuickAction(actor, token, { combatAction: 'use-item', action: 'use-item', label: 'Use Item' }, { shiftKey: event.shiftKey })
         }
 
         /**
@@ -902,13 +767,12 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {object} event The event
          * @param {object} actor The actor
          */
-        async #handleExtinguishBurningAction (event, actor) {
-            const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
+        async #handleExtinguishBurningAction (event, actor, token) {
             await this.#callCombatQuickAction(actor, token, {
                 combatAction: 'extinguish-burning',
                 action: 'extinguish-burning',
                 label: 'Put Out Fire'
-            })
+            }, { shiftKey: event.shiftKey })
         }
 
         /**
@@ -917,9 +781,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {object} event The event
          * @param {object} actor The actor
          */
-        async #handleDefensiveStanceAction (event, actor) {
-            const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
-            await this.#callCombatQuickAction(actor, token, { combatAction: 'defensive-stance', action: 'defensive-stance', label: 'Defensive Stance' })
+        async #handleDefensiveStanceAction (event, actor, token) {
+            await this.#callCombatQuickAction(actor, token, { combatAction: 'defensive-stance', action: 'defensive-stance', label: 'Defensive Stance' }, { shiftKey: event.shiftKey })
         }
 
         /**
@@ -928,17 +791,12 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {object} event The event
          * @param {object} actor The actor
          */
-        async #handleOpportunityAttackAction (event, actor) {
-            try {
-                const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
-                await this.#callCombatQuickAction(actor, token, {
-                    combatAction: 'attack-of-opportunity',
-                    action: 'attack-of-opportunity',
-                    label: game.i18n.localize('tokenActionHud.uesrpg3ev4.opportunityAttack')
-                })
-            } catch (error) {
-                console.error(`${MODULE.ID} | Error handling opportunity attack action`, error)
-            }
+        async #handleOpportunityAttackAction (event, actor, token) {
+            await this.#callCombatQuickAction(actor, token, {
+                combatAction: 'attack-of-opportunity',
+                action: 'attack-of-opportunity',
+                label: game.i18n.localize('tokenActionHud.uesrpg3ev4.opportunityAttack')
+            }, { shiftKey: event.shiftKey })
         }
 
         /**
@@ -948,31 +806,15 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {object} actor    The actor
          * @param {string} actionId The action id
          */
-        async #handleSpecialAction (event, actor, actionId) {
-            try {
-                let actionType = 'primary'
-                try {
-                    const def = await SystemAdapter.getSpecialActionDefinition(actionId)
-                    if (def?.actionType) actionType = String(def.actionType)
-                } catch (_e) {
-                    // ignore - fallback to primary
-                }
-
-                const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
-                await this.#callCombatQuickAction(actor, token, {
-                    combatAction: 'specialAction',
-                    action: 'specialAction',
-                    specialId: actionId,
-                    actionType
-                })
-            } catch (error) {
-                console.error(`${MODULE.ID} | Error handling special action`, error)
-                // Fallback to chat message
-                ChatMessage.create({
-                    speaker: ChatMessage.getSpeaker({ actor }),
-                    content: `<strong>${actor.name}</strong> performs <strong>${actionId}</strong>!`
-                })
-            }
+        async #handleSpecialAction (event, actor, actionId, token) {
+            const definition = await SystemAdapter.getSpecialActionDefinition(actionId)
+            if (!definition) return this.#warn('invalidAction')
+            await this.#callCombatQuickAction(actor, token, {
+                combatAction: 'specialAction',
+                action: 'specialAction',
+                specialId: actionId,
+                actionType: definition.actionType
+            }, { shiftKey: event.shiftKey })
         }
 
         /**
@@ -987,8 +829,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             if (!skill) return
 
             // Right-click: open sheet
-            if (this.isRenderItem()) {
-                return skill.sheet.render(true)
+            if (this.#isSheetRequest(event)) {
+                return SystemAdapter.openDocumentSheet({ document: skill })
             }
 
             // Left-click: call system skill roll handler (opposed/unopposed routing).
@@ -1007,14 +849,14 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const profKey = actionId.startsWith('prof-') ? actionId.substring(5) : actionId
 
             // Right-click: show profession details
-            if (this.isRenderItem()) {
-                const profValue = actor.system?.professions?.[profKey] || 0
+            if (this.#isSheetRequest(event)) {
+                const profValue = actor.system?.professions?.[profKey] ?? actor.system?.skills?.[profKey]?.value ?? 0
                 const spec = actor.system?.skills?.[profKey]?.specialization || ''
                 const name = spec || profKey.replace('profession', 'Profession ')
 
-                ChatMessage.create({
+                await ChatMessage.create({
                     speaker: ChatMessage.getSpeaker({ actor }),
-                    content: `<h3>${name}</h3><p>Value: ${profValue}%</p>`
+                    content: `<h3>${escapeText(name)}</h3><p>Value: ${escapeText(profValue)}%</p>`
                 })
                 return
             }
@@ -1106,9 +948,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {object} actor    The actor
          * @param {string} actionId The action id
          */
-        async #handleSecondaryActionAction (event, actor, actionId) {
+        async #handleSecondaryActionAction (event, actor, actionId, token) {
             if (actionId === 'reload-weapon') {
-                await this.#handleReloadWeaponAction(event, actor)
+                await this.#handleReloadWeaponAction(event, actor, token)
             }
         }
 
@@ -1118,9 +960,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {object} event The event
          * @param {object} actor The actor
          */
-        async #handleReloadWeaponAction (event, actor) {
-            const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
-            await this.#callCombatQuickAction(actor, token, { combatAction: 'reload-weapon', action: 'reload-weapon', label: 'Reload Weapon' })
+        async #handleReloadWeaponAction (event, actor, token) {
+            await this.#callCombatQuickAction(actor, token, { combatAction: 'reload-weapon', action: 'reload-weapon', label: 'Reload Weapon' }, { shiftKey: event.shiftKey })
         }
 
         /**
@@ -1137,142 +978,30 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             if (!combatStyle) return
 
             // Right-click: open sheet
-            if (this.isRenderItem()) {
-                return combatStyle.sheet.render(true)
+            if (this.#isSheetRequest(event)) {
+                return SystemAdapter.openDocumentSheet({ document: combatStyle })
             }
 
             // Left-click: use the system combat roll handler to preserve combat style allowances.
-            try {
-                await this.#callCombatStyleRoll(actor, actionId, { shiftKey: event?.shiftKey })
-            } catch (error) {
-                console.error(`${MODULE.ID} | Error handling combat style action`, error)
-                ui.notifications.error('Failed to roll combat style. See console for details.')
-            }
+            await this.#callCombatStyleRoll(actor, actionId, { shiftKey: event.shiftKey })
         }
 
         /**
-         * Handle weapon action
+         * Toggle the authoritative embedded item's equipped state, or open its sheet.
          * @private
          * @param {object} event    The event
          * @param {object} actor    The actor
          * @param {string} actionId The action id
          */
-        async #handleWeaponAction (event, actor, actionId) {
-            const weapon = actor.items.get(actionId)
-            if (!weapon) return
-
-            // Right-click: open sheet
-            if (this.isRenderItem()) {
-                return weapon.sheet.render(true)
-            }
-
-            // Left-click: toggle equipped status
-            const equipped = weapon.system?.equipped || false
-            const res = await SystemAdapter.setItemEquipped({ item: weapon, equipped: !equipped })
-            if (!res?.ok) {
-                this.#notifyDispatchIssue('Unable to update item equipped state.', {
-                    actorId: actor?.id,
-                    itemId: actionId,
-                    adapterPath: res?.path ?? 'none'
-                })
-                return
-            }
-
-            ui.notifications.info(`${weapon.name} ${!equipped ? 'equipped' : 'unequipped'}`)
-        }
-
-        /**
-         * Handle armor action
-         * @private
-         * @param {object} event    The event
-         * @param {object} actor    The actor
-         * @param {string} actionId The action id
-         */
-        async #handleArmorAction (event, actor, actionId) {
-            const armor = actor.items.get(actionId)
-            if (!armor) return
-
-            if (this.isRenderItem()) {
-                return armor.sheet.render(true)
-            }
-
-            // Toggle equipped status
-            const equipped = armor.system?.equipped || false
-            const res = await SystemAdapter.setItemEquipped({ item: armor, equipped: !equipped })
-            if (!res?.ok) {
-                this.#notifyDispatchIssue('Unable to update item equipped state.', {
-                    actorId: actor?.id,
-                    itemId: actionId,
-                    adapterPath: res?.path ?? 'none'
-                })
-                return
-            }
-
-            ui.notifications.info(`${armor.name} ${!equipped ? 'equipped' : 'unequipped'}`)
-        }
-
-        /**
-         * Handle shield action
-         * @private
-         * @param {object} event    The event
-         * @param {object} actor    The actor
-         * @param {string} actionId The action id
-         */
-        async #handleShieldAction (event, actor, actionId) {
-            const shield = actor.items.get(actionId)
-            if (!shield) return
-
-            if (this.isRenderItem()) {
-                return shield.sheet.render(true)
-            }
-
-            const equipped = shield.system?.equipped || false
-            const res = await SystemAdapter.setItemEquipped({ item: shield, equipped: !equipped })
-            if (!res?.ok) {
-                this.#notifyDispatchIssue('Unable to update item equipped state.', {
-                    actorId: actor?.id,
-                    itemId: actionId,
-                    adapterPath: res?.path ?? 'none'
-                })
-                return
-            }
-
-            ui.notifications.info(`${shield.name} ${!equipped ? 'equipped' : 'unequipped'}`)
-        }
-
-        /**
-         * Handle item action
-         * @private
-         * @param {object} event    The event
-         * @param {object} actor    The actor
-         * @param {string} actionId The action id
-         */
-        async #handleItemAction (event, actor, actionId) {
+        async #handleEquipmentAction (event, actor, actionId) {
             const item = actor.items.get(actionId)
-            if (!item) return
-
-            // Right-click: open sheet
-            if (this.isRenderItem()) {
-                return item.sheet.render(true)
+            if (!item) return this.#warn('invalidAction')
+            if (this.#isSheetRequest(event) || !('equipped' in (item.system ?? {}))) {
+                return SystemAdapter.openDocumentSheet({ document: item })
             }
-
-            // Left-click: toggle equipped if item has equipped property, otherwise open sheet
-            if (Object.prototype.hasOwnProperty.call(item.system || {}, 'equipped')) {
-                const equipped = item.system.equipped || false
-                const res = await SystemAdapter.setItemEquipped({ item, equipped: !equipped })
-                if (!res?.ok) {
-                    this.#notifyDispatchIssue('Unable to update item equipped state.', {
-                        actorId: actor?.id,
-                        itemId: actionId,
-                        adapterPath: res?.path ?? 'none'
-                    })
-                    return
-                }
-                ui.notifications.info(`${item.name} ${!equipped ? 'equipped' : 'unequipped'}`)
-            } else {
-                // No equipped property, just open sheet
-                item.sheet.render(true)
-            }
+            if (!canUpdateDocument(item)) return this.#warn('permissionDenied')
+            const result = await SystemAdapter.setItemEquipped({ item, equipped: item.system.equipped !== true })
+            if (!result?.ok) this.#warn('unsupportedAction')
         }
 
         /**
@@ -1284,45 +1013,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          */
         async #handleContainerAction (event, actor, actionId) {
             const item = actor.items.get(actionId)
-            if (!item) return
-            if (item.sheet && typeof item.sheet.render === 'function') {
-                item.sheet.render(true)
-            }
-        }
-
-        /**
-         * Handle ammunition action
-         * @private
-         * @param {object} event    The event
-         * @param {object} actor    The actor
-         * @param {string} actionId The action id
-         */
-        async #handleAmmunitionAction (event, actor, actionId) {
-            const ammo = actor.items.get(actionId)
-            if (!ammo) return
-
-            // Right-click: open sheet
-            if (this.isRenderItem()) {
-                return ammo.sheet.render(true)
-            }
-
-            // Left-click: toggle equipped if item has equipped property, otherwise open sheet
-            if (Object.prototype.hasOwnProperty.call(ammo.system || {}, 'equipped')) {
-                const equipped = ammo.system.equipped || false
-                const res = await SystemAdapter.setItemEquipped({ item: ammo, equipped: !equipped })
-                if (!res?.ok) {
-                    this.#notifyDispatchIssue('Unable to update item equipped state.', {
-                        actorId: actor?.id,
-                        itemId: actionId,
-                        adapterPath: res?.path ?? 'none'
-                    })
-                    return
-                }
-                ui.notifications.info(`${ammo.name} ${!equipped ? 'equipped' : 'unequipped'}`)
-            } else {
-                // No equipped property, just open sheet
-                ammo.sheet.render(true)
-            }
+            if (!item) return this.#warn('invalidAction')
+            await SystemAdapter.openDocumentSheet({ document: item })
         }
 
         /**
@@ -1332,24 +1024,11 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {object} actor    The actor
          * @param {string} actionId The action id
          */
-        async #handleSpellAction (event, actor, actionId) {
+        async #handleSpellAction (event, actor, actionId, token) {
             const spell = actor.items.get(actionId)
-            if (!spell) return
-
-            try {
-                const casterToken = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
-                if (!casterToken) {
-                    ui.notifications.warn('No caster token found. Select your token and try again.')
-                    return
-                }
-
-                // Use the system Cast Magic handler with a preselected spell to preserve routing/range gating.
-                await this.#callCastMagicAction(actor, casterToken, spell, { shiftKey: event?.shiftKey })
-            } catch (error) {
-                console.error(`${MODULE.ID} | Error casting spell`, error)
-                // Fallback to opening spell sheet
-                spell.sheet.render(true)
-            }
+            if (!spell || spell.type !== 'spell') return this.#warn('invalidAction')
+            if (token && !resolveActorToken(actor, token)) return this.#warn('invalidAction')
+            await this.#callCastMagicAction(actor, token, spell, { shiftKey: event.shiftKey })
         }
 
         /**
@@ -1359,7 +1038,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {object} actor
          * @param {string} actionId
          */
-        async #handleCastEnchantmentAction (event, actor, actionId) {
+        async #handleCastEnchantmentAction (event, actor, actionId, token) {
             const item = actor.items.get(actionId)
             if (!item) {
                 this.#notifyDispatchIssue('Cast-enchantment item was not found on the actor.', {
@@ -1369,7 +1048,6 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 return
             }
 
-            const token = this.token ?? canvas?.tokens?.controlled?.find(t => t?.actor?.id === actor.id) ?? actor.getActiveTokens?.()[0] ?? null
             const res = await SystemAdapter.executeCastEnchantment({
                 actor,
                 token,
@@ -1384,7 +1062,6 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                     adapterPath: res?.path ?? 'none',
                     reason: res?.reason ?? null
                 })
-                item.sheet?.render?.(true)
             }
         }
 
@@ -1395,13 +1072,15 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {object} actor
          * @param {string} actionId
          */
-        async #handleScrollAction (event, actor, actionId) {
+        async #handleScrollAction (event, actor, actionId, token) {
             const scroll = actor.items.get(actionId)
-            if (!scroll) return
+            if (!scroll || scroll.type !== 'scroll') return this.#warn('invalidAction')
 
-            if (this.isRenderItem()) {
-                return scroll.sheet?.render?.(true)
+            if (this.#isSheetRequest(event)) {
+                return SystemAdapter.openDocumentSheet({ document: scroll })
             }
+            if (!canUpdateDocument(actor)) return this.#warn('permissionDenied')
+            if (token && !resolveActorToken(actor, token)) return this.#warn('invalidAction')
 
             const res = await SystemAdapter.executeScrollCast({
                 actor,
@@ -1415,108 +1094,14 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                     itemId: actionId,
                     adapterPath: res?.path ?? 'none'
                 })
-                scroll.sheet?.render?.(true)
             }
         }
 
-        /**
-         * Handle language action.
-         * @private
-         * @param {object} event
-         * @param {object} actor
-         * @param {string} actionId
-         */
-        async #handleLanguageAction (event, actor, actionId) {
-            const res = await SystemAdapter.openSocialSelector({ actor, kind: 'language' })
-            if (!res?.ok) {
-                this.#notifyDispatchIssue('No language selector available.', {
-                    actorId: actor?.id,
-                    adapterPath: res?.path ?? 'none'
-                })
-            }
-        }
-
-        /**
-         * Handle faction action.
-         * @private
-         * @param {object} event
-         * @param {object} actor
-         * @param {string} actionId
-         */
-        async #handleFactionAction (event, actor, actionId) {
-            const res = await SystemAdapter.openSocialSelector({ actor, kind: 'faction' })
-            if (!res?.ok) {
-                this.#notifyDispatchIssue('No faction selector available.', {
-                    actorId: actor?.id,
-                    adapterPath: res?.path ?? 'none'
-                })
-            }
-        }
-
-        /**
-         * Handle actor-native language entry action.
-         * @private
-         * @param {object} event
-         * @param {object} actor
-         * @param {string} actionId
-         */
-        async #handleLanguageEntryAction (event, actor, actionId) {
-            const res = await SystemAdapter.openSocialSelector({ actor, kind: 'language', entryId: actionId })
-            if (!res?.ok) {
-                this.#notifyDispatchIssue('No language selector available.', {
-                    actorId: actor?.id,
-                    actionId,
-                    adapterPath: res?.path ?? 'none'
-                })
-            }
-        }
-
-        /**
-         * Handle actor-native faction entry action.
-         * @private
-         * @param {object} event
-         * @param {object} actor
-         * @param {string} actionId
-         */
-        async #handleFactionEntryAction (event, actor, actionId) {
-            const res = await SystemAdapter.openSocialSelector({ actor, kind: 'faction', entryId: actionId })
-            if (!res?.ok) {
-                this.#notifyDispatchIssue('No faction selector available.', {
-                    actorId: actor?.id,
-                    actionId,
-                    adapterPath: res?.path ?? 'none'
-                })
-            }
-        }
-
-        /**
-         * Handle manage languages action.
-         * @private
-         * @param {object} actor
-         */
-        async #handleManageLanguagesAction (actor) {
-            const res = await SystemAdapter.openSocialSelector({ actor, kind: 'language' })
-            if (!res?.ok) {
-                this.#notifyDispatchIssue('No language selector available.', {
-                    actorId: actor?.id,
-                    adapterPath: res?.path ?? 'none'
-                })
-            }
-        }
-
-        /**
-         * Handle manage factions action.
-         * @private
-         * @param {object} actor
-         */
-        async #handleManageFactionsAction (actor) {
-            const res = await SystemAdapter.openSocialSelector({ actor, kind: 'faction' })
-            if (!res?.ok) {
-                this.#notifyDispatchIssue('No faction selector available.', {
-                    actorId: actor?.id,
-                    adapterPath: res?.path ?? 'none'
-                })
-            }
+        /** The system owns both actor-native and legacy embedded social selectors. */
+        async #handleSocialAction (actor, kind, entryId = null) {
+            if (!canUpdateDocument(actor)) return this.#warn('permissionDenied')
+            const result = await SystemAdapter.openSocialSelector({ actor, kind, entryId })
+            if (!result?.ok) this.#warn('unsupportedAction')
         }
 
         /**
@@ -1530,7 +1115,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const feature = actor.items.get(actionId)
             if (!feature) return
 
-            const isRightClick = (event?.button === 2) || (event?.which === 3)
+            const isRightClick = this.#isRightClick(event)
             const isShiftHeld = event?.shiftKey === true
             const activation = feature?.system?.activation ?? {}
 
@@ -1540,39 +1125,29 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             // - For activated features: open sheet
             if (isRightClick) {
                 if (isShiftHeld) {
-                    return feature.sheet.render(true)
+                    return SystemAdapter.openDocumentSheet({ document: feature })
                 }
 
                 if (activation?.enabled === true) {
-                    return feature.sheet.render(true)
+                    return SystemAdapter.openDocumentSheet({ document: feature })
                 }
 
                 const mode = game.settings.get(MODULE.ID, 'passiveFeatureRightClick') || 'chat'
                 if (mode === 'sheet') {
-                    return feature.sheet.render(true)
+                    return SystemAdapter.openDocumentSheet({ document: feature })
                 }
 
                 // mode === 'chat': post description using system content format
+                if (!canUpdateDocument(feature)) return this.#warn('permissionDenied')
                 await this.#postFeatureDescriptionToChat(feature, actor, event)
                 return
             }
 
             // Left-click: delegate to the system's canonical sheet handlers so that
             // HUD activation behaves identically to the item-sheet "Activate" button.
-            try {
-                const res = await SystemAdapter.executeFeatureActivation({ item: feature, actor, event })
-                if (!res?.ok) {
-                    this.#notifyDispatchIssue('No feature activation handler is available; posting description only.', {
-                        actorId: actor?.id,
-                        itemId: actionId,
-                        adapterPath: res?.path ?? 'none'
-                    })
-                    await this.#postFeatureDescriptionToChat(feature, actor, event)
-                }
-            } catch (err) {
-                console.error(`${MODULE.ID} | Feature activation failed`, err)
-                ui.notifications.error('Failed to activate feature. See console for details.')
-            }
+            if (!canUpdateDocument(feature)) return this.#warn('permissionDenied')
+            const res = await SystemAdapter.executeFeatureActivation({ item: feature, actor, event })
+            if (!res?.ok) this.#warn('unsupportedAction')
         }
 
         /**
@@ -1586,13 +1161,13 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          */
         async #postFeatureDescriptionToChat (feature, actor, event) {
             // Build content matching the system's _buildDefaultPostContent format (with image).
-            const img = feature.img ?? ''
-            const name = feature.name ?? 'Feature'
-            const type = feature.type ?? ''
+            const img = escapeText(feature.img)
+            const name = escapeText(feature.name ?? 'Feature')
+            const type = escapeText(feature.type)
             const description = feature.system?.description ?? ''
             const content = img
-                ? `<h2><img src="${img}"</img>${name}</h2>\n    <i><b>${type}</b></i><p>\n      <i>${description}</i>`
-                : `<h2>${name}</h2><p>\n  <i><b>${type}</b></i><p>\n    <i>${description}</i>`
+                ? `<h2><img src="${img}" alt="">${name}</h2><p><b>${type}</b></p><div>${description}</div>`
+                : `<h2>${name}</h2><p><b>${type}</b></p><div>${description}</div>`
 
             await ChatMessage.create({
                 user: game.user.id,
@@ -1618,21 +1193,19 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {object|null} actorOverride Preferred actor context
          */
         async #handleUtilityAction (token, actionId, actorOverride = null) {
-            const actor = actorOverride ?? token?.actor ?? this.actor ?? null
+            const actor = actorOverride ?? token?.actor ?? null
             switch (actionId) {
             case 'endTurn':
                 if (token && game.combat?.current?.tokenId === token.id) {
-                    await game.combat?.nextTurn()
+                    if (!canUpdateDocument(game.combat)) return this.#warn('permissionDenied')
+                    await game.combat.nextTurn()
                 }
                 break
 
             case 'shortRest':
             case 'longRest': {
                 if (!actor) break
-                if (!game.user?.isGM && !actor?.isOwner) {
-                    ui.notifications?.warn?.('You do not have permission to rest this actor.')
-                    break
-                }
+                if (!canUpdateDocument(actor)) return this.#warn('permissionDenied')
                 const res = await SystemAdapter.applyRest({ actor, restType: actionId })
                 if (!res?.ok) {
                     this.#notifyDispatchIssue('Unable to apply rest action.', {
@@ -1641,7 +1214,6 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                         adapterPath: res?.path ?? 'none'
                     })
                 }
-                if (actor.sheet?.rendered) actor.sheet.render(false)
                 break
             }
             }
@@ -1655,13 +1227,14 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {object|null} actorOverride
          */
         async #handleResourcesAction (token, actionId, actorOverride = null) {
-            const actor = actorOverride ?? token?.actor ?? this.actor ?? null
+            const actor = actorOverride ?? token?.actor ?? null
             switch (actionId) {
             case 'resource-health':
             case 'resource-stamina':
             case 'resource-magicka':
             case 'resource-luck': {
                 if (!actor) break
+                if (!canUpdateDocument(actor)) return this.#warn('permissionDenied')
                 const res = await SystemAdapter.openResourceDialog({ actor, resourceId: actionId })
                 if (!res?.ok) {
                     this.#notifyDispatchIssue('Unable to open resource dialog.', {

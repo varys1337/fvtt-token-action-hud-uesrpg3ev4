@@ -1,5 +1,5 @@
 import { MODULE } from './constants.js'
-import { diagLog } from './utils.js'
+import { canUpdateDocument, diagLog } from './utils.js'
 
 function _getTokenActionHudApi () {
     return game?.uesrpg?.api?.tokenActionHud ?? null
@@ -19,8 +19,10 @@ export class SystemAdapter {
     }
 
     static diagnosticsSnapshot () {
+        const api = _getTokenActionHudApi()
         return {
             ...SystemAdapter.refreshCapabilities(),
+            runtimeMethods: Object.keys(api ?? {}).filter(key => typeof api[key] === 'function').sort(),
             systemId: game?.system?.id ?? null,
             systemVersion: game?.system?.version ?? null
         }
@@ -37,6 +39,7 @@ export class SystemAdapter {
 
     static async executeCombatQuickAction ({ actor, token = null, payload = {}, shiftKey = false } = {}) {
         if (!actor) return { ok: false, path: 'none', reason: 'no-actor' }
+        if (!canUpdateDocument(actor)) return { ok: false, path: 'none', reason: 'permission-denied' }
         const api = _getTokenActionHudApi()
         if (typeof api?.executeCombatQuickAction === 'function') {
             return api.executeCombatQuickAction({ actor, token, payload, shiftKey })
@@ -47,6 +50,7 @@ export class SystemAdapter {
 
     static async executeCastMagic ({ actor, token = null, preselectedSpell = null, shiftKey = false, castActionType = 'primary' } = {}) {
         if (!actor) return { ok: false, path: 'none', reason: 'no-actor' }
+        if (!canUpdateDocument(actor)) return { ok: false, path: 'none', reason: 'permission-denied' }
         const api = _getTokenActionHudApi()
         if (typeof api?.executeCastMagic === 'function') {
             return api.executeCastMagic({ actor, token, preselectedSpell, shiftKey, castActionType })
@@ -55,46 +59,20 @@ export class SystemAdapter {
         return { ok: false, path: 'none', reason: 'missing-system-api' }
     }
 
-    static async executeCastEnchantment ({ actor, token = null, itemId, shiftKey = false } = {}) {
+    static async executeCastEnchantment ({ actor, itemId } = {}) {
         if (!actor || !itemId) return { ok: false, path: 'none', reason: 'bad-args' }
 
         const item = actor.items?.get?.(itemId) ?? null
         if (!item) return { ok: false, path: 'none', reason: 'missing-item' }
 
-        // Cast Enchantments must mirror the actor sheet inventory button, not the
-        // generic Cast Magic action. The generic Cast Magic path treats stored item
-        // spells as selectable spell sources and opens Spell Options before it reaches
-        // the item-spellcasting runtime. The actor-sheet handler preserves the stored
-        // spellcasting configuration on the item, including Ignore Test / skip test.
-        const sheet = actor.sheet ?? null
-        const handler = sheet?._onCastEnchantmentAction ?? sheet?.onCastEnchantmentAction ?? null
-        if (typeof handler === 'function') {
-            const target = {
-                dataset: { action: 'castEnchantment', itemId: item.id },
-                closest: () => target
-            }
-            const event = {
-                currentTarget: target,
-                target,
-                shiftKey: Boolean(shiftKey),
-                preventDefault: () => {},
-                stopPropagation: () => {}
-            }
-
-            await handler.call(sheet, event, target)
-            return { ok: true, path: 'actor-sheet-cast-enchantment-handler' }
+        // The current public system API does not expose item-enchantment casting.
+        // Its native sheet owns stored spell slots, cost pools, and skip-test rules.
+        const opened = await SystemAdapter.openDocumentSheet({ document: actor })
+        if (opened.ok) {
+            ui.notifications?.info?.(game.i18n.localize('tokenActionHud.uesrpg3ev4.openActorSheetForEnchantment'))
+            return { ...opened, nativeFallback: true }
         }
-
-        const api = _getTokenActionHudApi()
-        if (typeof api?.executeCastEnchantment === 'function') {
-            return api.executeCastEnchantment({ actor, token, item, sourceItem: item, itemId: item.id, shiftKey })
-        }
-        if (typeof api?.castEnchantment === 'function') {
-            return api.castEnchantment({ actor, token, item, sourceItem: item, itemId: item.id, shiftKey })
-        }
-
-        SystemAdapter.logDiagnostics('Missing system cast-enchantment handler', { method: 'executeCastEnchantment', actorId: actor.id, itemId: item.id })
-        return { ok: false, path: 'none', reason: 'missing-system-api' }
+        return opened
     }
 
     static async executeSkillRoll ({ actor, itemId, shiftKey = false } = {}) {
@@ -139,6 +117,7 @@ export class SystemAdapter {
 
     static async executeFeatureActivation ({ item, actor, event = null } = {}) {
         if (!item) return { ok: false, path: 'none', reason: 'no-item' }
+        if (!canUpdateDocument(item)) return { ok: false, path: 'none', reason: 'permission-denied' }
         const api = _getTokenActionHudApi()
         if (typeof api?.executeFeatureActivation === 'function') {
             return api.executeFeatureActivation({ item, actor, event })
@@ -149,6 +128,7 @@ export class SystemAdapter {
 
     static async executeScrollCast ({ actor, scrollItem, castActionType = 'primary' } = {}) {
         if (!actor || !scrollItem) return { ok: false, path: 'none', reason: 'bad-args' }
+        if (!canUpdateDocument(actor)) return { ok: false, path: 'none', reason: 'permission-denied' }
         const api = _getTokenActionHudApi()
         if (typeof api?.executeScrollCast === 'function') {
             return api.executeScrollCast({ actor, scrollItem, castActionType })
@@ -159,6 +139,7 @@ export class SystemAdapter {
 
     static async openResourceDialog ({ actor, resourceId } = {}) {
         if (!actor || !resourceId) return { ok: false, path: 'none', reason: 'bad-args' }
+        if (!canUpdateDocument(actor)) return { ok: false, path: 'none', reason: 'permission-denied' }
         const api = _getTokenActionHudApi()
         if (typeof api?.openResourceDialog === 'function') {
             return api.openResourceDialog({ actor, resourceId })
@@ -168,7 +149,8 @@ export class SystemAdapter {
     }
 
     static async applyRest ({ actor, restType } = {}) {
-        if (!actor || !restType) return { ok: false, path: 'none', reason: 'bad-args' }
+        if (!actor || !['shortRest', 'longRest'].includes(restType)) return { ok: false, path: 'none', reason: 'bad-args' }
+        if (!canUpdateDocument(actor)) return { ok: false, path: 'none', reason: 'permission-denied' }
         const api = _getTokenActionHudApi()
         if (typeof api?.applyRest === 'function') {
             return api.applyRest({ actor, restType })
@@ -179,6 +161,7 @@ export class SystemAdapter {
 
     static async openSocialSelector ({ actor, kind, entryId = null } = {}) {
         if (!actor || !kind) return { ok: false, path: 'none', reason: 'bad-args' }
+        if (!canUpdateDocument(actor)) return { ok: false, path: 'none', reason: 'permission-denied' }
         const api = _getTokenActionHudApi()
         if (typeof api?.openSocialSelector === 'function') {
             return api.openSocialSelector({ actor, kind, entryId })
@@ -207,6 +190,7 @@ export class SystemAdapter {
 
     static async setItemEquipped ({ item, equipped } = {}) {
         if (!item) return { ok: false, path: 'none', reason: 'no-item' }
+        if (!canUpdateDocument(item)) return { ok: false, path: 'none', reason: 'permission-denied' }
         const api = _getTokenActionHudApi()
         if (typeof api?.setItemEquipped === 'function') {
             return api.setItemEquipped({ item, equipped })
@@ -216,16 +200,15 @@ export class SystemAdapter {
     }
 
     static async openDocumentSheet ({ document } = {}) {
-        const api = _getTokenActionHudApi()
-        if (typeof api?.openDocumentSheet === 'function') {
-            return api.openDocumentSheet({ document })
-        }
-        SystemAdapter.logDiagnostics('Missing system Token Action HUD API', { method: 'openDocumentSheet' })
-        return { ok: false, path: 'none', reason: 'missing-system-api' }
+        const sheet = document?.sheet
+        if (typeof sheet?.render !== 'function') return { ok: false, path: 'none', reason: 'no-sheet' }
+        await sheet.render({ force: true })
+        return { ok: true, path: 'document.sheet.render' }
     }
 
     static async runFeaturePostChatAutomation ({ item, actor = null, event = null } = {}) {
         if (!item) return { ok: false, path: 'none', reason: 'no-item' }
+        if (!canUpdateDocument(item)) return { ok: false, path: 'none', reason: 'permission-denied' }
         const api = _getTokenActionHudApi()
         if (typeof api?.runFeaturePostChatAutomation === 'function') {
             return api.runFeaturePostChatAutomation({ item, actor, event })

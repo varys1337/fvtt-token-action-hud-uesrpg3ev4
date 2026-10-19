@@ -1,7 +1,7 @@
 import { debugLog } from './utils.js'
 
 /**
- * Phase 4: Extension registry.
+ * Additive build-extension registry.
  *
  * Allows system-adjacent modules/macros to register small, additive action-build extensions
  * without modifying the core action builder. This stays intentionally shallow to avoid
@@ -14,7 +14,7 @@ const _buildExtensions = new Set()
 /**
  * Register an action-build extension.
  *
- * The callback is invoked after this module builds its standard actions and before caching.
+ * The callback is invoked once after this module builds its standard actions.
  * It receives a single context argument:
  *  {
  *    handler, actor, token, isMultiTokenSelection, actors, delimiter

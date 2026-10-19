@@ -18,6 +18,9 @@
       "specialActions": "Special Actions",
       "attackMelee": "Attack (Melee)",
       "attackRanged": "Attack (Ranged)",
+      "meleeWeaponAttack": "Melee Weapon Attack",
+      "rangedWeaponAttack": "Ranged Weapon Attack",
+      "specialAction": "Special Action",
       "aim": "Aim",
       "castMagic": "Cast Magic",
       "castMagicInstant": "Cast Magic (Instant)",
@@ -94,6 +97,8 @@
       "power": "Power",
       "language": "Language",
       "faction": "Faction",
+      "languageEntry": "Language Entry",
+      "factionEntry": "Faction Entry",
       "manageLanguages": "Manage Languages",
       "manageFactions": "Manage Factions",
       "settings": {
@@ -122,7 +127,26 @@
           "name": "Strict action diagnostics",
           "hint": "Show fail-visible warnings for critical action dispatch issues instead of silent no-op behavior."
         }
-      }
+      },
+      "invalidAction": "This HUD action is invalid or no longer available.",
+      "noSupportedTokens": "No supported UESRPG tokens selected.",
+      "mixedActorTypes": "Select tokens of one actor type.",
+      "permissionDenied": "You do not have permission to modify this document.",
+      "actionFailed": "The HUD action could not be completed. See the console for details.",
+      "multiActionFailed": "The HUD action failed for {count} selected actors. See the console for details.",
+      "ambiguousSpatialSelection": "Select only one token per linked actor for this action.",
+      "selectionChanged": "Token selection changed. Run the action again.",
+      "selectOneTokenForStatus": "Select one token to manage status effect overlays.",
+      "confirmMultiTitle": "Confirm Multi-Token Execution",
+      "confirmMultiContent": "Execute {action} for {count} selected tokens?",
+      "openActorSheetForEnchantment": "Use Cast Enchantment on the actor sheet to preserve the system casting workflow.",
+      "unsupportedAction": "This action is unavailable in the installed system.",
+      "ambiguousSharedItem": "Shared item names are ambiguous. Use the actor sheet to choose the item.",
+      "actionPointUpdateFailed": "Action Points could not be updated. The tracker shows the current document value.",
+      "actionsTrackerHint": "Left-click to add one Action Point; right-click to subtract one. Manual edits apply to the displayed actor.",
+      "burnLuck": "Burn Luck",
+      "burnLuckHint": "Opens the system Burn Luck workflow, which uses the Luck characteristic. The LP badge displays Luck Points separately.",
+      "systemManagedFeature": "System-managed feature"
     }
   }
 }

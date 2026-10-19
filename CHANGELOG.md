@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-10-19
+
+### Changed
+- Target Foundry 14.368+ within generation 14, UESRPG v14.3.1+, and Token Action HUD Core 2.1.2+ from the 2.1 API series.
+- Use one metadata-based action dispatcher with captured modifiers and exact actor/token context.
+- Open the native actor sheet for enchantment casting and the native Token HUD for status overlays.
+- Preserve Core's ApplicationV2 ownership, layout, and themes; adapt known legacy action rows without resetting saved layouts.
+
+### Fixed
+- Remove retained action snapshots, duplicate combat callbacks, and companion attack-counter writes.
+- Restore build extensions and consistent settings refreshes; coalesce relevant supplemental document refreshes.
+- Separate shared multi-selection actions from private inventory/effect IDs and reject ambiguous linked-token spatial execution.
+- Serialize manual AP edits from document data, guard permissions and stale selection, and read authoritative system attack tracker views.
+- Repair feature/profession right-click routing, use DialogV2 cancellation, and escape generated text/tooltip output.
+- Package complete source releases under real version tags with working manifest/download URLs.
+
+### Validation and limitations
+- Source inspection only. No tests, syntax execution, builds, benchmarks, or live Foundry checks were performed; the historical manifest verification claim was not increased.
+- System enchantment API and explicit-token handling, plus Core asynchronous dispatch handling, remain documented upstream findings. No dependencies or actor/Item schemas were changed.
+
 ## [1.0.14] - 2026-02-12
 
 ### Added
