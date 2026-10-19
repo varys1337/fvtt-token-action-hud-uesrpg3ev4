@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - 2026-10-19
+
+### Fixed
+- Fit long plain-text HUD labels within existing button dimensions with bounded font reduction and up to two complete lines. Preserve full-name accessibility and use whole-line ellipsis in compact themes.
+- Add the authoritative read-only attack counter inside Utility by default.
+- Install the explicitly approved AP-only Core filter adapter so matching local AP control writes update the counter in place without the normal full HUD rebuild. Preserve normal document hooks and all unrelated refresh paths.
+
+### Integration boundary
+- The adapter wraps only the current Core HUD instance's public Actor-update filter and restores it on close/teardown when still owned. Unknown payloads, mismatched values/identity, additional fields, late notifications, and separate Token/Item/effect changes retain normal refreshes.
+- Source inspection only; no tests, builds, syntax execution, benchmarks, or live Foundry checks. Runtime rendering and hook timing remain unverified.
+
 ## [1.3.0] - 2026-10-19
 
 ### Changed

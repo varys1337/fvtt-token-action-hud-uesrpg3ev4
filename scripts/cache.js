@@ -1,5 +1,6 @@
 import { CORE_MODULE, MODULE } from './constants.js'
 import { hasChangedPath, sameDocument } from './utils.js'
+import { isManualApUpdate } from './manual-ap-refresh.js'
 
 /**
  * Compatibility API: actions now derive directly from documents on each build.
@@ -109,9 +110,12 @@ export function registerHudRefreshHooks () {
     if (_refreshHooksRegistered) return
     _refreshHooksRegistered = true
 
-    for (const name of ['updateActor', 'deleteActor']) {
-        Hooks.on(name, supplementActorRefresh)
-    }
+    Hooks.on('updateActor', (actor, changes) => {
+        if (isManualApUpdate(actor, changes)) return
+        supplementActorRefresh(actor, changes)
+    })
+    // A delete hook's second argument is operation options, not update data.
+    Hooks.on('deleteActor', actor => supplementActorRefresh(actor))
     for (const name of ['createItem', 'updateItem', 'deleteItem']) {
         Hooks.on(name, item => supplementActorRefresh(getOwningActor(item)))
     }
@@ -131,7 +135,11 @@ export function registerHudRefreshHooks () {
         })
     }
 
-    for (const name of ['createActorDelta', 'updateActorDelta', 'deleteActorDelta']) {
+    Hooks.on('updateActorDelta', (delta, changes) => {
+        if (isManualApUpdate(delta.parent?.actor, changes)) return
+        if (isRelevantDocument(delta.parent, getHudContext())) requestHudRefresh(delta.parent)
+    })
+    for (const name of ['createActorDelta', 'deleteActorDelta']) {
         Hooks.on(name, delta => {
             if (isRelevantDocument(delta.parent, getHudContext())) requestHudRefresh(delta.parent)
         })

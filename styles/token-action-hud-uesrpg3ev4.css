@@ -1,6 +1,47 @@
 /* Core owns the HUD layout and theme variables. Only companion elements and
  * explicitly marked actions are styled here. */
 
+/* Fit names inside Core's existing button dimensions, leaving icons and badges
+ * at their theme size. The fitter reduces only overflowing labels. */
+#token-action-hud-app #token-action-hud .tah-button-box[data-uesrpg-text-fit] > .tah-button-content {
+    align-items: center;
+    height: 100%;
+    min-height: 0;
+    min-width: 0;
+}
+
+#token-action-hud-app #token-action-hud .tah-button-box[data-uesrpg-text-fit] > .tah-button-content > .tah-button-text {
+    flex: 1 1 auto;
+    line-height: 1.1;
+    max-height: 100%;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    white-space: normal;
+}
+
+#token-action-hud-app #token-action-hud .tah-button-box[data-uesrpg-text-fit="group"] > .tah-button-content > .tah-button-text {
+    white-space: nowrap;
+}
+
+#token-action-hud-app #token-action-hud [data-uesrpg-text-fit] .tah-info-container {
+    flex-shrink: 0;
+}
+
+#token-action-hud-app #token-action-hud [data-uesrpg-text-fit] .tah-button-text[data-uesrpg-text-overflow="true"] {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+}
+
+#token-action-hud-app #token-action-hud [data-uesrpg-text-fit] .tah-button-text[data-uesrpg-text-lines="1"] {
+    -webkit-line-clamp: 1;
+}
+
+#token-action-hud-app #token-action-hud [data-uesrpg-text-fit="group"] .tah-button-text[data-uesrpg-text-overflow="true"] {
+    display: block;
+    text-overflow: ellipsis;
+}
+
 /* Resource shortcuts remain interactive while using a compact badge layout. */
 #token-action-hud-app .tah-action-button.uesrpg-resource-badge {
     height: 22px;

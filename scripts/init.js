@@ -10,6 +10,8 @@ import {
 import { registerBuildExtension, unregisterBuildExtension } from './extensions.js'
 import { registerLayoutCompatibilityHooks } from './layout-compatibility.js'
 import { SystemAdapter } from './system-adapter.js'
+import { attachHudTextFitting, detachHudTextFitting } from './text-fit.js'
+import { attachManualApRefreshFilter, detachManualApRefreshFilter, runManualApUpdate } from './manual-ap-refresh.js'
 
 let hudApp = null
 let hudRoot = null
@@ -47,7 +49,9 @@ function queueActionPointEdit (delta) {
         const points = readActionPoints(current.actor)
         if (!points) return
         const next = Math.max(0, Math.min(points.max, points.value + delta))
-        if (next !== points.value) await current.actor.update({ 'system.action_points.value': next })
+        if (next !== points.value) {
+            await runManualApUpdate(current.actor, next, () => current.actor.update({ 'system.action_points.value': next }))
+        }
         updateTracker()
     }).catch(error => {
         console.error(`${MODULE.ID} | Action point update failed`, error)
@@ -121,6 +125,8 @@ function scheduleTrackerUpdate () {
 }
 
 function clearTracker () {
+    detachManualApRefreshFilter()
+    detachHudTextFitting()
     lifecycleGeneration += 1
     if (trackerTimer !== null) clearTimeout(trackerTimer)
     trackerTimer = null
@@ -147,7 +153,9 @@ registerLayoutCompatibilityHooks()
 Hooks.on('renderTokenActionHud', (app, element, context, options) => {
     hudApp = app
     hudRoot = element
+    attachManualApRefreshFilter(app, scheduleTrackerUpdate)
     updateTracker(element)
+    attachHudTextFitting(element)
 })
 Hooks.on('closeTokenActionHud', app => {
     if (app === hudApp) clearTracker()

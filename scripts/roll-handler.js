@@ -11,7 +11,7 @@ const ACTION_TYPES = new Set([
     'characteristic', 'weapon', 'armor', 'shield', 'item', 'container', 'ammunition', 'spell',
     'scroll', 'languageEntry', 'factionEntry', 'manageLanguages', 'manageFactions', 'language',
     'faction', 'talent', 'trait', 'power', 'secondaryAction', 'statusEffect', 'activeEffect',
-    'resources', 'utility', 'multiCombat', 'multiItem'
+    'resources', 'utility', 'tracker', 'multiCombat', 'multiItem'
 ])
 const SPATIAL_ACTION_TYPES = new Set([
     'attack', 'meleeWeaponAttack', 'rangedWeaponAttack', 'aim', 'castMagic', 'dash', 'disengage',
@@ -37,6 +37,8 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             try {
                 const action = this.#resolveAction(encodedValue)
                 if (!action) return this.#warn('invalidAction')
+                // Informational counters never dispatch a document or system action.
+                if (action.actionTypeId === 'tracker') return
                 const click = this.#snapshotEvent(event)
                 const selected = Array.from(canvas?.tokens?.controlled ?? [])
                 const contexts = selected
@@ -140,6 +142,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             actionTypeId = actionTypeId.replace(/^tokenActionHud\.uesrpg3ev4\./, '')
             actionTypeId = ({ delayAction: 'delay', extinguish: 'extinguishBurning' })[actionTypeId] ?? actionTypeId
             if (!ACTION_TYPES.has(actionTypeId)) return null
+            if (actionTypeId === 'tracker' && actionId !== 'attacks') return null
             if (actionTypeId === 'multiCombat' && !['attack~melee', 'attack~ranged'].includes(actionId)) return null
             if (actionTypeId === 'multiItem' && !this.#parseSharedItem(actionId)) return null
             return { actionTypeId, actionId }

@@ -888,6 +888,16 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 cssClass: 'shrink uesrpg-resource-badge'
             })
 
+            const attackCount = this.#getAttacksThisRoundText()
+            if (attackCount) {
+                utilityActions.push({
+                    id: 'attack-counter',
+                    name: game.i18n.format('tokenActionHud.uesrpg3ev4.attackCounter', { value: attackCount }),
+                    tooltip: game.i18n.localize('tokenActionHud.uesrpg3ev4.attackCounterHint'),
+                    system: { actionTypeId: 'tracker', actionId: 'attacks' }
+                })
+            }
+
             // Add rest actions (only show for single token selection)
             utilityActions.push({
                 id: 'shortRest',

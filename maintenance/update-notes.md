@@ -1,5 +1,7 @@
 # 1.3.0 maintenance notes
 
+The later [1.3.1 UI update](ui-followup.md) documents adaptive labels, the Utility attack counter, and the explicitly approved AP-only Core filter adapter. The original 1.3.0 scope below remains an implementation record.
+
 ## Baselines and validation boundary
 
 Implementation is confined to this companion. Baselines inspected: UESRPG v14.3.1, Token Action HUD Core 2.1.2, the official Foundry v14 API (14.368), and Foundry 14.369 release notes. No dependency source files were edited and no world/document migration was introduced.

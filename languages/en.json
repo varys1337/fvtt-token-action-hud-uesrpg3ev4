@@ -72,6 +72,8 @@
       "actionPoints": "Action Points",
       "actionPointsSpent": "AP Spent",
       "attacksThisRound": "Attacks This Round",
+      "attackCounter": "Attacks {value}",
+      "attackCounterHint": "Attacks used this round / current system limit. Read-only; the system manages this counter.",
       "attacksRemaining": "Attacks Remaining",
       "reloadState": "Reload",
       "reloadNone": "No Ranged",
