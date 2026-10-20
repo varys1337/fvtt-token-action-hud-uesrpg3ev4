@@ -1,0 +1,244 @@
+/* Optional preset layered over Core's Foundry Light layout. The render hook
+ * supplies the marker only for uesrpgParchment; no other style is overridden.
+ * System assets are referenced in place, relative to this module stylesheet. */
+#token-action-hud-app.tah-style-foundry-vtt-light:has(#token-action-hud[data-uesrpg-hud-theme="parchment"]) {
+    /* Resolve the texture from this stylesheet, rather than inheriting the
+     * system's relative ../images URL into the companion module. */
+    --uesrpg-hud-parchment: url("../../../systems/uesrpg-3ev4/images/elements/backgrounds/pale_parchment.webp");
+    --uesrpg-hud-category-frame: url("../../../systems/uesrpg-3ev4/images/elements/interface/borders/window-frame-wood.webp");
+    --uesrpg-hud-ink: var(--uesrpg-tab-control-text, #2a2014);
+    --uesrpg-hud-accent: var(--uesrpg-color-parchment-red, #7c1315);
+    --uesrpg-hud-border: var(--uesrpg-tab-control-border, rgba(92, 69, 34, 0.35));
+    --uesrpg-hud-border-hover: var(--uesrpg-tab-control-border-hover, rgba(113, 82, 36, 0.62));
+    --uesrpg-hud-surface: var(--uesrpg-tab-control-surface, rgba(142, 102, 48, 0.1));
+    --uesrpg-hud-surface-hover: var(--uesrpg-tab-control-hover, rgba(142, 102, 48, 0.18));
+    --uesrpg-hud-control-width: 24px;
+    --tah-background-color: transparent;
+    --tah-border-radius: 6px;
+    --tah-gap: var(--uesrpg-space-sm, 6px);
+    --tah-button-background: var(--uesrpg-hud-parchment) center / cover #e9dcc1;
+    --tah-button-background-color: var(--uesrpg-hud-surface);
+    --tah-button-border: 1px solid var(--uesrpg-hud-border);
+    --tah-button-box-shadow: inset 0 1px 0 rgba(255, 248, 231, 0.45);
+    --tah-button-box-font-weight: 600;
+    --tah-button-height: 36px;
+    --tah-button-min-width: 36px;
+    --tah-button-text-color: var(--uesrpg-hud-ink);
+    --tah-button-text-shadow: none;
+    --tah-button-hover-background-color: var(--uesrpg-hud-surface-hover);
+    --tah-button-hover-border: 1px solid var(--uesrpg-hud-border-hover);
+    --tah-button-hover-box-shadow: inset 0 0 0 1px var(--uesrpg-hud-border-hover);
+    --tah-button-hover-text-primary-color: var(--uesrpg-hud-accent);
+    --tah-button-hover-text-secondary-color: var(--uesrpg-hud-ink);
+    --tah-button-hover-text-tertiary-color: var(--uesrpg-hud-accent);
+    --tah-button-active-background-color: rgba(124, 19, 21, 0.12);
+    --tah-button-active-text-color: var(--uesrpg-hud-accent);
+    --tah-button-active-box-shadow: inset 3px 0 0 var(--uesrpg-hud-accent), inset 0 0 0 1px var(--uesrpg-hud-border-hover);
+    --tah-button-toggle-background-color: var(--uesrpg-hud-surface);
+    --tah-button-toggle-hover-background-color: var(--uesrpg-hud-surface-hover);
+    --tah-button-toggle-hover-border: var(--tah-button-hover-border);
+    --tah-button-toggle-hover-box-shadow: var(--tah-button-hover-box-shadow);
+    --tah-button-image-background-color: rgba(54, 38, 17, 0.12);
+    --tah-button-image-border-radius: 4px;
+    --tah-button-image-height: 28px;
+    --tah-button-image-width: 28px;
+    --tah-icon-color: var(--uesrpg-hud-ink);
+    --tah-icon-hover-color: var(--uesrpg-hud-accent);
+    --tah-icon-text-shadow: none;
+    --tah-icon-hover-text-shadow: none;
+    --tah-text-primary-color: var(--uesrpg-hud-ink);
+    --tah-text-secondary-color: #51412c;
+    --tah-text-tertiary-color: var(--uesrpg-hud-accent);
+    --tah-text-disabled-color: #6b6050;
+    --tah-text-hover-primary-color: var(--uesrpg-hud-accent);
+    --tah-text-hover-secondary-color: var(--uesrpg-hud-ink);
+    --tah-text-hover-tertiary-color: var(--uesrpg-hud-accent);
+    --tah-text-shadow: none;
+    --tah-character-name-color: var(--uesrpg-hud-accent);
+    --tah-character-name-text-shadow: none;
+    --tah-list-subgroup-title-icon-color: var(--uesrpg-hud-accent);
+    --tah-list-subgroup-title-hover-icon-color: var(--uesrpg-hud-accent);
+    --tah-subgroups-background: transparent;
+    font-family: var(--uesrpg-font-family, "Cyrodiil", serif);
+    color: var(--uesrpg-hud-ink);
+}
+
+/* The canvas remains visible between controls and behind open categories.
+ * Core still owns panel placement, sizing, visibility, and scroll behavior. */
+#token-action-hud-app.tah-style-foundry-vtt-light #token-action-hud[data-uesrpg-hud-theme="parchment"] {
+    align-items: center;
+    background: transparent;
+    box-shadow: none;
+    gap: var(--tah-gap);
+    padding: 0;
+    position: relative;
+}
+
+#token-action-hud-app.tah-style-foundry-vtt-light #token-action-hud[data-uesrpg-hud-theme="parchment"] .tah-groups :is(.tah-tab-group, .tah-tab-subgroup) > .tah-subgroups-container:is(.expand-up, .expand-down) > .tah-subgroups {
+    background: transparent;
+    box-shadow: none;
+    scrollbar-color: var(--uesrpg-scrollbar-color, var(--uesrpg-hud-accent)) var(--uesrpg-scrollbar-track, transparent);
+    scrollbar-width: thin;
+}
+
+#token-action-hud-app.tah-style-foundry-vtt-light #token-action-hud[data-uesrpg-hud-theme="parchment"] .tah-groups {
+    filter: none;
+}
+
+#token-action-hud-app.tah-style-foundry-vtt-light #token-action-hud[data-uesrpg-hud-theme="parchment"] .tah-button-box {
+    box-sizing: border-box;
+    font-family: inherit;
+    font-size: var(--uesrpg-font-md, 14px);
+    line-height: 1.2;
+}
+
+/* Each category, sub-tab, and AP control gets its own complete wood frame.
+ * Parchment faces replace the opaque brown fill used by the first pass. */
+#token-action-hud-app.tah-style-foundry-vtt-light #token-action-hud[data-uesrpg-hud-theme="parchment"] .tah-button-box:is(.tah-group-button, .tah-subgroup-button) {
+    --uesrpg-hud-tab-background: linear-gradient(180deg, rgba(255, 250, 238, 0.18), rgba(142, 102, 48, 0.08)), var(--uesrpg-hud-parchment) center / cover #e9dcc1;
+    --tah-button-text-color: var(--uesrpg-hud-accent);
+    --tah-button-border: 5px solid transparent;
+    --tah-button-hover-border: 5px solid transparent;
+    --tah-button-box-shadow: 0 1px 3px rgba(25, 15, 5, 0.3);
+    --tah-button-hover-box-shadow: inset 0 -2px 0 var(--uesrpg-hud-accent), 0 1px 3px rgba(25, 15, 5, 0.3);
+    background: var(--uesrpg-hud-tab-background);
+    border-image: var(--uesrpg-hud-category-frame) 70 / 5px stretch;
+    border-radius: 0;
+    color: var(--tah-button-text-color);
+}
+
+#token-action-hud-app.tah-style-foundry-vtt-light #token-action-hud[data-uesrpg-hud-theme="parchment"] .tah-button-box:is(.tah-group-button, .tah-subgroup-button):is(:hover, :focus-visible, .active):not(:disabled, .disabled, [aria-disabled="true"]),
+#token-action-hud-app.tah-style-foundry-vtt-light #token-action-hud[data-uesrpg-hud-theme="parchment"] :is(.tah-tab-group, .tah-tab-subgroup).hover > .tah-button-box:not(:disabled, .disabled, [aria-disabled="true"]) {
+    --uesrpg-hud-tab-background: linear-gradient(180deg, rgba(255, 250, 238, 0.3), rgba(142, 102, 48, 0.16)), var(--uesrpg-hud-parchment) center / cover #e9dcc1;
+    /* Core's hover border shorthand would otherwise reset the frame image. */
+    border: var(--tah-button-hover-border);
+    border-image: var(--uesrpg-hud-category-frame) 70 / 5px stretch;
+    box-shadow: var(--tah-button-hover-box-shadow);
+}
+
+/* Explicit backgrounds out-rank Core's active/toggle background shorthands,
+ * keeping the same paper grain through hover, focus, and selected states. */
+#token-action-hud-app.tah-style-foundry-vtt-light #token-action-hud[data-uesrpg-hud-theme="parchment"] .tah-groups .tah-action > .tah-button-box.tah-action-button {
+    --uesrpg-hud-action-wash: linear-gradient(180deg, rgba(255, 250, 238, 0.18), rgba(142, 102, 48, 0.04));
+    background: var(--uesrpg-hud-action-wash), var(--uesrpg-hud-parchment) center / cover #e9dcc1;
+    border-radius: var(--uesrpg-tab-radius-compact, 6px);
+    box-shadow: inset 0 1px 0 rgba(255, 248, 231, 0.6), 0 1px 2px rgba(25, 15, 5, 0.18);
+}
+
+#token-action-hud-app.tah-style-foundry-vtt-light #token-action-hud[data-uesrpg-hud-theme="parchment"] .tah-groups .tah-action > .tah-button-box.tah-action-button:is(:hover, :focus-visible):not(:disabled, .disabled, [aria-disabled="true"], .active) {
+    --uesrpg-hud-action-wash: linear-gradient(180deg, rgba(255, 250, 238, 0.32), rgba(142, 102, 48, 0.16));
+}
+
+#token-action-hud-app.tah-style-foundry-vtt-light #token-action-hud[data-uesrpg-hud-theme="parchment"] .tah-groups .tah-action > .tah-button-box.tah-action-button.active {
+    --uesrpg-hud-action-wash: linear-gradient(rgba(124, 19, 21, 0.1), rgba(124, 19, 21, 0.1));
+    border-color: var(--uesrpg-hud-accent);
+    box-shadow: var(--tah-button-active-box-shadow);
+}
+
+#token-action-hud-app.tah-style-foundry-vtt-light #token-action-hud[data-uesrpg-hud-theme="parchment"] .tah-ap-tracker {
+    padding: 0 10px;
+}
+
+#token-action-hud-app.tah-style-foundry-vtt-light #token-action-hud[data-uesrpg-hud-theme="parchment"] .tah-action-button.uesrpg-resource-badge {
+    font-size: var(--uesrpg-font-xs, 12px);
+    height: 22px;
+    padding: 0 8px;
+}
+
+#token-action-hud-app.tah-style-foundry-vtt-light #token-action-hud[data-uesrpg-hud-theme="parchment"] .tah-groups .tah-list-subgroup .tah-list-subgroup-title {
+    border-bottom: 1px solid var(--uesrpg-hud-border);
+    color: var(--uesrpg-hud-accent);
+    font-family: var(--uesrpg-font-heading, "Cyrodiil", serif);
+    font-size: var(--uesrpg-font-md, 14px);
+    font-weight: 700;
+    line-height: 1.2;
+    padding: 4px 2px;
+    text-shadow: 0 1px 0 rgba(255, 245, 220, 0.65), 0 0 3px rgba(255, 245, 220, 0.4);
+}
+
+#token-action-hud-app.tah-style-foundry-vtt-light #token-action-hud[data-uesrpg-hud-theme="parchment"] #tah-character-name {
+    background: var(--tah-button-background);
+    border: 1px solid var(--uesrpg-hud-border-hover);
+    border-radius: 4px;
+    font-family: var(--uesrpg-font-heading, "Cyrodiil", serif);
+    font-size: var(--uesrpg-font-md, 14px);
+    font-weight: 700;
+    left: 0;
+    line-height: 1.2;
+    padding: 2px 8px;
+}
+
+/* Keep the control outside the bar without moving the first category. The
+ * transparent right padding bridges the gap so Core's HUD hover is retained. */
+#token-action-hud-app.tah-style-foundry-vtt-light #token-action-hud[data-uesrpg-hud-theme="parchment"] #tah-collapse-expand {
+    align-items: center;
+    box-sizing: border-box;
+    display: flex;
+    height: var(--tah-button-height);
+    left: auto;
+    padding: 0 var(--tah-gap) 0 0;
+    right: 100%;
+    top: 0;
+    width: calc(var(--uesrpg-hud-control-width) + var(--tah-gap));
+}
+
+#token-action-hud-app.tah-style-foundry-vtt-light #token-action-hud[data-uesrpg-hud-theme="parchment"] #tah-buttons {
+    gap: var(--tah-gap);
+}
+
+/* Size visible controls consistently without changing Core's display rules. */
+#token-action-hud-app.tah-style-foundry-vtt-light #token-action-hud[data-uesrpg-hud-theme="parchment"] #tah-collapse-expand > :is(#tah-collapse-hud, #tah-expand-hud),
+#token-action-hud-app.tah-style-foundry-vtt-light #token-action-hud[data-uesrpg-hud-theme="parchment"] #tah-buttons > .tah-button-icon {
+    align-items: center;
+    background: var(--tah-button-background);
+    border: 1px solid var(--uesrpg-hud-border);
+    border-radius: 4px;
+    box-sizing: border-box;
+    color: var(--uesrpg-hud-ink);
+    flex: 0 0 var(--uesrpg-hud-control-width);
+    height: var(--tah-button-height);
+    justify-content: center;
+    margin: 0;
+    min-width: var(--uesrpg-hud-control-width);
+    padding: 0;
+    text-align: center;
+    width: var(--uesrpg-hud-control-width);
+}
+
+#token-action-hud-app.tah-style-foundry-vtt-light #token-action-hud[data-uesrpg-hud-theme="parchment"] #tah-collapse-expand > :is(#tah-collapse-hud, #tah-expand-hud) > i,
+#token-action-hud-app.tah-style-foundry-vtt-light #token-action-hud[data-uesrpg-hud-theme="parchment"] #tah-buttons > .tah-button-icon > i {
+    font-size: var(--font-size-16, 16px);
+    margin: 0;
+    padding: 0;
+}
+
+#token-action-hud-app.tah-style-foundry-vtt-light #token-action-hud[data-uesrpg-hud-theme="parchment"] #tah-collapse-expand > :is(#tah-collapse-hud, #tah-expand-hud):hover:not(:disabled, .disabled, [aria-disabled="true"]),
+#token-action-hud-app.tah-style-foundry-vtt-light #token-action-hud[data-uesrpg-hud-theme="parchment"] #tah-buttons > .tah-button-icon:hover:not(:disabled, .disabled, [aria-disabled="true"]) {
+    border-color: var(--uesrpg-hud-border-hover);
+}
+
+#token-action-hud-app.tah-style-foundry-vtt-light #token-action-hud[data-uesrpg-hud-theme="parchment"] :is(.tah-button-box, .tah-button-icon):focus-visible,
+#token-action-hud-app.tah-style-foundry-vtt-light #token-action-hud[data-uesrpg-hud-theme="parchment"] #tah-buttons #tah-drag-hud:focus-visible {
+    outline: 2px solid var(--uesrpg-hud-accent);
+    outline-offset: 2px;
+}
+
+#token-action-hud-app.tah-style-foundry-vtt-light #token-action-hud[data-uesrpg-hud-theme="parchment"] .tah-action-button.uesrpg-tah-partial:not(:focus-visible) {
+    outline: 1px dashed var(--uesrpg-hud-accent);
+    outline-offset: -3px;
+}
+
+#token-action-hud-app.tah-style-foundry-vtt-light #token-action-hud[data-uesrpg-hud-theme="parchment"] .tah-button-box:is(:disabled, .disabled, [aria-disabled="true"]),
+#token-action-hud-app.tah-style-foundry-vtt-light #token-action-hud[data-uesrpg-hud-theme="parchment"] .tah-groups .tah-action > .tah-button-box.tah-action-button:is(:disabled, .disabled, [aria-disabled="true"]) {
+    box-shadow: none;
+    opacity: 0.65;
+}
+
+/* Keep edit regions transparent while preserving Core's geometry and cues. */
+#token-action-hud-app.tah-style-foundry-vtt-light #token-action-hud[data-uesrpg-hud-theme="parchment"] .tah-groups.tah-unlocked [data-part="subgroup"] {
+    background: transparent;
+}
+
+#token-action-hud-app.tah-style-foundry-vtt-light #token-action-hud[data-uesrpg-hud-theme="parchment"] .tah-groups :is(.tah-add-group-button, .tah-add-subgroup-button, .tah-add-action-button):not(.tah-drop-indicator) {
+    background: var(--tah-button-background);
+}

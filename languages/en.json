@@ -1,6 +1,9 @@
 {
   "tokenActionHud": {
     "uesrpg3ev4": {
+      "styles": {
+        "parchment": "UESRPG Parchment (Framed)"
+      },
       "combatActions": "Combat Actions",
       "skills": "Skills",
       "inventory": "Inventory",
@@ -142,6 +145,7 @@
       "confirmMultiTitle": "Confirm Multi-Token Execution",
       "confirmMultiContent": "Execute {action} for {count} selected tokens?",
       "openActorSheetForEnchantment": "Use Cast Enchantment on the actor sheet to preserve the system casting workflow.",
+      "tooltipDescriptionUnavailable": "Description unavailable.",
       "unsupportedAction": "This action is unavailable in the installed system.",
       "ambiguousSharedItem": "Shared item names are ambiguous. Use the actor sheet to choose the item.",
       "actionPointUpdateFailed": "Action Points could not be updated. The tracker shows the current document value.",

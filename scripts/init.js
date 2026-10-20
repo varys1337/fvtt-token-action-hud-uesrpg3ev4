@@ -1,5 +1,5 @@
 import { SystemManager } from './system-manager.js'
-import { MODULE, REQUIRED_CORE_MODULE_VERSION } from './constants.js'
+import { CORE_MODULE, MODULE, PARCHMENT_STYLE_ID, REQUIRED_CORE_MODULE_VERSION } from './constants.js'
 import { isSupportedActor, debugLog, sameDocument, resolveActorToken, canUpdateDocument, hasChangedPath, readActionPoints } from './utils.js'
 import {
     invalidateAllBuildCaches,
@@ -18,6 +18,17 @@ let hudRoot = null
 let trackerTimer = null
 let lifecycleGeneration = 0
 const pendingApEdits = new Map()
+
+/** Modify pending ApplicationV2 content; Core owns the outer style class. */
+function syncHudTheme (root) {
+    const hud = root?.matches?.('#token-action-hud') ? root : root?.querySelector?.('#token-action-hud')
+    if (!hud) return
+    if (game.settings.get(CORE_MODULE.ID, 'style') === PARCHMENT_STYLE_ID && hud.querySelector('[data-part="groups"]')) {
+        hud.dataset.uesrpgHudTheme = 'parchment'
+    } else {
+        hud.removeAttribute('data-uesrpg-hud-theme')
+    }
+}
 
 /** Core owns selection, including the assigned-character HUD with no controlled token. */
 function getTrackerContext () {
@@ -153,6 +164,7 @@ registerLayoutCompatibilityHooks()
 Hooks.on('renderTokenActionHud', (app, element, context, options) => {
     hudApp = app
     hudRoot = element
+    syncHudTheme(element)
     attachManualApRefreshFilter(app, scheduleTrackerUpdate)
     updateTracker(element)
     attachHudTextFitting(element)

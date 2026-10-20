@@ -1,5 +1,5 @@
 // System Module Imports
-import { GROUP, MODULE, SPELL_SCHOOLS } from './constants.js'
+import { CORE_MODULE, GROUP, MODULE, SPELL_SCHOOLS } from './constants.js'
 import { isSupportedActor, debugLog, diagLog, escapeText, resolveActorToken, getStatusEffectConfigs, readAttackTrackerView } from './utils.js'
 import { runBuildExtensions } from './extensions.js'
 import { SystemAdapter } from './system-adapter.js'
@@ -200,11 +200,12 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
         /**
          * Build tooltip HTML for a feature item.
          * @private
+         * @param {string} itemId
          * @param {object} itemData
          * @param {object} activation
-         * @returns {string}
+         * @returns {Promise<string>}
          */
-        #buildFeatureTooltip (itemData, activation = {}) {
+        async #buildFeatureTooltip (itemId, itemData, activation = {}) {
             const descriptionHtml = itemData?.system?.description || ''
             const enabled = activation?.enabled === true
             const typeLabel = this.#getActivationTypeLabel(activation?.actionType)
@@ -223,12 +224,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 ? `<div class="uesrpg-tah-tooltip-meta">${metaParts.map(escapeText).join(' • ')}</div>`
                 : ''
 
-            // Tooltips must be readable in both Foundry light/dark themes. Item descriptions may contain
-            // inline styling from the editor (e.g. black text) which becomes unreadable against dark
-            // tooltip backgrounds. We therefore normalize tooltip content to plain text.
-            const descriptionText = this.#tooltipPlainText(descriptionHtml)
-            const descLine = descriptionText
-                ? `<div class="uesrpg-tah-tooltip-desc">${descriptionText}</div>`
+            const description = await this.#enrichTooltipDescription(itemId, descriptionHtml)
+            const descLine = description
+                ? `<div class="uesrpg-tah-tooltip-desc">${description}</div>`
                 : `<div class="uesrpg-tah-tooltip-desc"><i>No description.</i></div>`
 
             return `
@@ -242,43 +240,55 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
         }
 
         /**
-         * Convert arbitrary HTML to tooltip-safe plain text.
-         * Preserves basic line breaks while stripping inline styles.
+         * Prepare rich description HTML once during the action build. Foundry
+         * owns document-link resolution and interaction, including relative UUIDs.
          * @private
+         * @param {string} itemId The authoritative embedded Item ID
          * @param {string} html
-         * @returns {string}
+         * @returns {Promise<string>}
          */
-        #tooltipPlainText (html) {
-            const raw = String(html ?? '')
-            if (!raw.trim()) return ''
+        async #enrichTooltipDescription (itemId, html) {
+            if (typeof html !== 'string' || !html.trim()) return ''
 
             try {
+                const mode = game.settings.get(CORE_MODULE.ID, 'tooltips')
+                if (mode === 'none' || mode === 'nameOnly') return ''
+
+                // Capture the source document before enrichment awaits any lookups.
+                const item = this.actor?.items?.get(itemId)
+                if (!item) throw new Error('Tooltip source Item is no longer available')
+                const cleaned = foundry.utils.cleanHTML(html)
+                const editor = foundry.applications.ux.TextEditor.implementation
+                const enriched = await editor.enrichHTML(cleaned, {
+                    documents: true,
+                    links: true,
+                    relativeTo: item,
+                    rolls: false,
+                    embeds: false,
+                    custom: false,
+                    secrets: false
+                })
+
                 const template = document.createElement('template')
-                template.innerHTML = raw
-                const div = template.content
+                template.innerHTML = enriched
+                // Keep semantic markup and native anchor attributes. Only remove
+                // authored color/alignment overrides that conflict with tooltips.
+                for (const element of template.content.querySelectorAll('[style], [color], [bgcolor], [align]')) {
+                    for (const property of ['color', 'background-color', 'text-align', 'text-align-last']) {
+                        element.style.removeProperty(property)
+                    }
+                    for (const attribute of ['color', 'bgcolor', 'align']) element.removeAttribute(attribute)
+                    if (!element.getAttribute('style')?.trim()) element.removeAttribute('style')
+                }
 
-                // Replace <br> with newlines to preserve author intent.
-                div.querySelectorAll('br').forEach(br => br.replaceWith('\n'))
-
-                // Newline after list items and paragraphs for readability.
-                div.querySelectorAll('li').forEach(li => {
-                    li.insertAdjacentText('beforeend', '\n')
-                })
-                div.querySelectorAll('p').forEach(p => {
-                    p.insertAdjacentText('beforeend', '\n')
-                })
-
-                const text = (div.textContent ?? '').replace(/\r\n/g, '\n')
-                const normalized = text
-                    .split('\n')
-                    .map(l => escapeText(l.trim()))
-                    .filter(Boolean)
-                    .join('<br>')
-
-                return normalized
-            } catch (_err) {
-                // Fallback: best-effort strip tags.
-                return escapeText(raw.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim())
+                const hasContent = template.content.textContent?.trim()
+                    || template.content.querySelector('a, img, svg, table, hr, audio, video')
+                if (!hasContent) return ''
+                return `<div class="uesrpg-tah-rich-description">${template.innerHTML}</div>`
+            } catch (error) {
+                debugLog('Tooltip description unavailable', { itemId, error })
+                const message = escapeText(game.i18n.localize('tokenActionHud.uesrpg3ev4.tooltipDescriptionUnavailable'))
+                return `<div class="uesrpg-tah-rich-description"><i>${message}</i></div>`
             }
         }
 
@@ -289,9 +299,9 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * @param {string} itemId
          * @param {object} itemData
          * @param {string} encodedType
-         * @returns {{ action: object, sortWeight: number, nameKey: string, isActivated: boolean }}
+         * @returns {Promise<{ action: object, sortWeight: number, nameKey: string, isActivated: boolean }>}
          */
-        #buildFeatureAction (itemId, itemData, encodedType) {
+        async #buildFeatureAction (itemId, itemData, encodedType) {
             const activation = itemData?.system?.activation ?? {}
             const isActivated = activation?.enabled === true
             const actionType = this.#normalizeActivationType(activation?.actionType)
@@ -303,7 +313,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                 id: itemId,
                 name: itemData?.name ?? 'Feature',
                 system: { actionTypeId: encodedType, actionId: itemId },
-                tooltip: this.#buildFeatureTooltip(itemData, activation),
+                tooltip: await this.#buildFeatureTooltip(itemId, itemData, activation),
                 cssClass: isActivated ? 'active' : ''
             }
 
@@ -1967,22 +1977,20 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * Build cast-enchantment item actions under the Spells category.
          * @private
          */
-        #buildCastEnchantments () {
+        async #buildCastEnchantments () {
             const groupData = { id: GROUP.castEnchantments.id, type: 'system' }
-            const actions = []
-
-            for (const [itemId, itemData] of this.#getAllItemEntries()) {
-                if (!this.#hasCastEnchantmentConfiguration(itemData)) continue
-
+            const entries = this.#getAllItemEntries().filter(([, itemData]) => this.#hasCastEnchantmentConfiguration(itemData))
+            const guidance = escapeText(game.i18n.localize('tokenActionHud.uesrpg3ev4.openActorSheetForEnchantment'))
+            const actions = await Promise.all(entries.map(async ([itemId, itemData]) => {
                 const description = itemData.system?.description || itemData.system?.flavor || ''
-                actions.push({
+                return {
                     id: `castEnchantment-${itemId}`,
                     name: itemData.name ?? itemId,
                     system: { actionTypeId: 'castEnchantment', actionId: itemId },
                     img: itemData.img,
-                    tooltip: `${this.#tooltipPlainText(description)}<br>${escapeText(game.i18n.localize('tokenActionHud.uesrpg3ev4.openActorSheetForEnchantment'))}`
-                })
-            }
+                    tooltip: `${await this.#enrichTooltipDescription(itemId, description)}<br>${guidance}`
+                }
+            }))
 
             if (actions.length > 0) this.addActions(actions, groupData)
         }
@@ -1994,7 +2002,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
         async #buildSpells () {
             if (this.#getItemsCount() === 0) return
 
-            this.#buildCastEnchantments()
+            await this.#buildCastEnchantments()
 
             // Group spells by school
             const spellsBySchool = new Map()
@@ -2019,10 +2027,7 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
 
                 const groupId = `${school}Spells`
                 const groupData = { id: groupId, type: 'system' }
-                const actions = []
-
-
-                for (const { itemId, itemData } of spells) {
+                const actions = await Promise.all(spells.map(async ({ itemId, itemData }) => {
                     // Get MP cost from system.cost and level from system.level (confirmed from magic workflow)
                     const mpCost = itemData.system?.cost ?? 0
                     const level = itemData.system?.level ?? 0
@@ -2030,15 +2035,15 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
                     const isAttackSpell = itemData.system?.isAttackSpell === true
                     const name = isAttackSpell ? this.#withAttackTracker(itemData.name) : itemData.name
 
-                    actions.push({
+                    return {
                         id: itemId,
                         name,
                         system: { actionTypeId: 'spell', actionId: itemId },
                         info1: this.#textInfo(`MP ${mpCost}`),
                         info2: this.#textInfo(`Level ${level}`),
-                        tooltip: description
-                    })
-                }
+                        tooltip: await this.#enrichTooltipDescription(itemId, description)
+                    }
+                }))
 
                 if (actions.length > 0) {
                     this.addActions(actions, groupData)
@@ -2075,9 +2080,10 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const activated = []
             const passive = []
 
-            for (const [itemId, itemData] of this.#getItemsOfType('talent')) {
-                if (!itemData) continue
-                const built = this.#buildFeatureAction(itemId, itemData, 'talent')
+            const builtFeatures = await Promise.all(this.#getItemsOfType('talent')
+                .filter(([, itemData]) => itemData)
+                .map(([itemId, itemData]) => this.#buildFeatureAction(itemId, itemData, 'talent')))
+            for (const built of builtFeatures) {
                 all.push(built.action)
                 if (built.isActivated) activated.push(built)
                 else passive.push(built)
@@ -2110,9 +2116,10 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const activated = []
             const passive = []
 
-            for (const [itemId, itemData] of this.#getItemsOfType('trait')) {
-                if (!itemData) continue
-                const built = this.#buildFeatureAction(itemId, itemData, 'trait')
+            const builtFeatures = await Promise.all(this.#getItemsOfType('trait')
+                .filter(([, itemData]) => itemData)
+                .map(([itemId, itemData]) => this.#buildFeatureAction(itemId, itemData, 'trait')))
+            for (const built of builtFeatures) {
                 all.push(built.action)
                 if (built.isActivated) activated.push(built)
                 else passive.push(built)
@@ -2145,9 +2152,10 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
             const activated = []
             const passive = []
 
-            for (const [itemId, itemData] of this.#getItemsOfType('power')) {
-                if (!itemData) continue
-                const built = this.#buildFeatureAction(itemId, itemData, 'power')
+            const builtFeatures = await Promise.all(this.#getItemsOfType('power')
+                .filter(([, itemData]) => itemData)
+                .map(([itemId, itemData]) => this.#buildFeatureAction(itemId, itemData, 'power')))
+            for (const built of builtFeatures) {
                 all.push(built.action)
                 if (built.isActivated) activated.push(built)
                 else passive.push(built)

@@ -1,7 +1,7 @@
 // System Module Imports
 import { ActionHandler } from './action-handler.js'
 import { RollHandler as Core } from './roll-handler.js'
-import { MODULE } from './constants.js'
+import { MODULE, PARCHMENT_STYLE_ID } from './constants.js'
 import { DEFAULTS } from './defaults.js'
 import * as systemSettings from './settings.js'
 
@@ -76,11 +76,19 @@ Hooks.once('tokenActionHudCoreApiReady', async (coreModule) => {
          * Returns styles to Token Action HUD Core
          * Called by Token Action HUD Core
          * @override
-         * @returns {object} The TAH system styles (empty - no custom styles registered)
+         * @returns {object} The optional TAH system styles
          */
         registerStyles () {
-            // No custom styles - return empty object
-            return {}
+            return {
+                [PARCHMENT_STYLE_ID]: {
+                    // Reuse Core's layout. The render hook marks only this preset
+                    // for the companion's parchment and frame overrides.
+                    class: 'tah-style-foundry-vtt-light',
+                    file: 'tah-uesrpg-parchment',
+                    moduleId: MODULE.ID,
+                    name: game.i18n.localize('tokenActionHud.uesrpg3ev4.styles.parchment')
+                }
+            }
         }
     }
 })

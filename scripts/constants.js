@@ -12,6 +12,9 @@ export const CORE_MODULE = {
     ID: 'token-action-hud-core'
 }
 
+/** Optional Core style preset; selection remains owned by Core's client setting. */
+export const PARCHMENT_STYLE_ID = 'uesrpgParchment'
+
 /**
  * Core module version required by the system module
  */

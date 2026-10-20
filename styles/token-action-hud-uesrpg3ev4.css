@@ -1,6 +1,12 @@
 /* Core owns the HUD layout and theme variables. Only companion elements and
  * explicitly marked actions are styled here. */
 
+/* Foundry's faded-ui opacity is independent of Core's refresh pipeline. Keep
+ * this companion HUD readable through AP edits and temporary hover loss. */
+#token-action-hud-app:has([data-uesrpg-actions-tracker-role="wrapper"]) {
+    --ui-fade-opacity: 1;
+}
+
 /* Fit names inside Core's existing button dimensions, leaving icons and badges
  * at their theme size. The fitter reduces only overflowing labels. */
 #token-action-hud-app #token-action-hud .tah-button-box[data-uesrpg-text-fit] > .tah-button-content {
@@ -90,9 +96,18 @@
     pointer-events: none;
 }
 
+/* Core marks HUD tooltips even though Foundry renders them outside the HUD.
+ * Override Core's paragraph/list alignment as well as the inherited alignment;
+ * short text and final lines stay at the start instead of being stretched. */
+body.system-uesrpg-3ev4 :is(#tooltip, .locked-tooltip).tah-tooltip,
+body.system-uesrpg-3ev4 :is(#tooltip, .locked-tooltip).tah-tooltip .tah-tooltip-wrapper :is(p, ul, ol) {
+    text-align: justify;
+    text-align-last: start;
+}
+
 /* Foundry renders tooltips outside the HUD. Scope the contrast treatment to
  * feature content carrying this companion's tooltip marker. */
-#tooltip:has(.uesrpg-tah-tooltip) {
+:is(#tooltip, .locked-tooltip):has(.uesrpg-tah-tooltip) {
     background: rgba(18, 18, 22, 0.96) !important;
     background-image: none !important;
     border: 1px solid rgba(255, 255, 255, 0.12) !important;
@@ -100,45 +115,83 @@
     padding: 12px 14px !important;
 }
 
-#tooltip .uesrpg-tah-tooltip,
-#tooltip .uesrpg-tah-tooltip * {
+:is(#tooltip, .locked-tooltip) .uesrpg-tah-tooltip,
+:is(#tooltip, .locked-tooltip) .uesrpg-tah-tooltip * {
     color: #f2f2f2;
 }
 
-#tooltip .uesrpg-tah-tooltip {
+:is(#tooltip, .locked-tooltip) .uesrpg-tah-tooltip {
     line-height: 1.35;
     max-width: 420px;
 }
 
-#tooltip .uesrpg-tah-tooltip-title {
+:is(#tooltip, .locked-tooltip) .uesrpg-tah-tooltip-title {
     font-weight: 700;
     font-size: 14px;
-    text-align: right;
     margin-bottom: 4px;
 }
 
-#tooltip .uesrpg-tah-tooltip-meta {
+:is(#tooltip, .locked-tooltip) .uesrpg-tah-tooltip-meta {
     font-size: 12px;
     opacity: 0.9;
-    text-align: right;
 }
 
-#tooltip .uesrpg-tah-tooltip-sep {
+:is(#tooltip, .locked-tooltip) .uesrpg-tah-tooltip-sep {
     border: 0;
     border-top: 1px solid rgba(255, 255, 255, 0.15);
     margin: 8px 0;
 }
 
-#tooltip .uesrpg-tah-tooltip-desc {
+:is(#tooltip, .locked-tooltip) .uesrpg-tah-tooltip-desc {
     font-size: 13px;
 }
 
-#tooltip .uesrpg-tah-tooltip a {
+:is(#tooltip, .locked-tooltip) .uesrpg-tah-tooltip a {
     color: #b7adff;
 }
 
-#tooltip .uesrpg-tah-tooltip code {
+:is(#tooltip, .locked-tooltip) .uesrpg-tah-tooltip code {
     background: rgba(255, 255, 255, 0.08);
     padding: 0 0.2em;
     border-radius: 3px;
+}
+
+/* Native enriched anchors keep their UUIDs, icons, and Foundry interaction.
+ * Only companion description content receives this link presentation. */
+body.system-uesrpg-3ev4 :is(#tooltip, .locked-tooltip).tah-tooltip .uesrpg-tah-rich-description a {
+    color: #b7adff;
+}
+
+body.system-uesrpg-3ev4 :is(#tooltip, .locked-tooltip).tah-tooltip .uesrpg-tah-rich-description a.content-link {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(183, 173, 255, 0.35);
+    border-radius: 3px;
+    display: inline-block;
+    line-height: inherit;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    padding: 0 3px;
+    text-align: start;
+    text-align-last: start;
+    vertical-align: baseline;
+    white-space: normal;
+}
+
+body.system-uesrpg-3ev4 :is(#tooltip, .locked-tooltip).tah-tooltip .uesrpg-tah-rich-description a.content-link > i {
+    color: inherit;
+}
+
+body.system-uesrpg-3ev4 :is(#tooltip, .locked-tooltip).tah-tooltip .uesrpg-tah-rich-description a:is(:hover, :focus-visible) {
+    color: #f2efff;
+    text-decoration: underline;
+}
+
+body.system-uesrpg-3ev4 :is(#tooltip, .locked-tooltip).tah-tooltip .uesrpg-tah-rich-description a.content-link:is(:hover, :focus-visible) {
+    background: rgba(183, 173, 255, 0.16);
+    border-color: #b7adff;
+}
+
+body.system-uesrpg-3ev4 :is(#tooltip, .locked-tooltip).tah-tooltip .uesrpg-tah-rich-description a:focus-visible {
+    outline: 2px solid #b7adff;
+    outline-offset: 2px;
 }

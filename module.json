@@ -10,7 +10,7 @@
     }
   ],
   "url": "https://github.com/varys1337/fvtt-token-action-hud-uesrpg3ev4",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "compatibility": {
     "minimum": "14.368",
     "verified": "14.360",
@@ -22,6 +22,9 @@
   "styles": [
     {
       "src": "styles/token-action-hud-uesrpg3ev4.css"
+    },
+    {
+      "src": "styles/tah-uesrpg-parchment.css"
     }
   ],
   "languages": [
@@ -57,7 +60,7 @@
     }
   },
   "manifest": "https://github.com/varys1337/fvtt-token-action-hud-uesrpg3ev4/releases/latest/download/module.json",
-  "download": "https://github.com/varys1337/fvtt-token-action-hud-uesrpg3ev4/releases/download/v1.3.1/module.zip",
+  "download": "https://github.com/varys1337/fvtt-token-action-hud-uesrpg3ev4/releases/download/v1.4.0/module.zip",
   "readme": "https://github.com/varys1337/fvtt-token-action-hud-uesrpg3ev4/blob/main/readme.md",
   "flags": {}
 }

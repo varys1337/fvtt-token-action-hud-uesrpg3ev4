@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-10-20
+
+### Added
+- Register the optional **UESRPG Parchment (Framed)** Core style with individual wood frames, system parchment textures, Cyrodiil typography, and transparent bar/panel backgrounds. Preserve the current style until selected.
+- Enrich existing spell, talent, trait, power, and cast-enchantment descriptions into native Foundry document links, preserving rich formatting and relative Item references. Await completed descriptions per group, reuse feature results, and skip enrichment in names-only/disabled tooltip modes.
+
+### Fixed
+- Position collapse/expand outside the first category with a traversable 6px gap, normalize utility controls, and retain saved HUD positions and Core visibility behavior.
+- Preserve active/disabled states, parchment textures, focus cues, and partial-selection indicators.
+- Justify HUD tooltip text and style native links consistently in hover and locked tooltips. Handle description failures locally without displaying unprocessed source HTML or aborting the HUD build.
+- Keep this companion HUD opaque through AP edits and temporary hover loss, using a HUD-scoped UI fade variable; leave other Foundry UI fading and Core layout transitions unchanged.
+- Recognize the exact owning ActorDelta identity for unlinked-token AP updates, retaining UUID/value checks and normal refreshes for other changes.
+
+### Validation and boundaries
+- Source inspection and release-package checks only; no tests, JavaScript execution, compilation, or live Foundry verification. Runtime acceptance scenarios are recorded in the maintenance notes.
+- Retain native tooltip interaction and access checks. Disable roll/embed/custom enrichment and unrevealed secrets. Add no schema migration, layout reset, dependency source patch, or compatibility-verification increase.
+
 ## [1.3.1] - 2026-10-19
 
 ### Fixed

@@ -7,6 +7,8 @@
  * All unmatched or uncertain changes retain the original filter result.
  */
 
+import { sameDocument } from './utils.js'
+
 const FILTER_METHOD = 'isValidActorOrItemUpdate'
 const AP_VALUE_PATH = 'system.action_points.value'
 const pendingWrites = new Map()
@@ -27,13 +29,28 @@ function isPlainRecord (value) {
     return prototype === Object.prototype || prototype === null
 }
 
+/** Synthetic Actor hooks retain the exact owning ActorDelta's update-envelope ID. */
+function actorUpdateIds (actor) {
+    const ids = new Set()
+    if (typeof actor.id === 'string' && actor.id) ids.add(actor.id)
+    if (actor.isToken === true) {
+        const token = actor.token
+        const delta = token?.delta
+        if (delta?.constructor?.documentName === 'ActorDelta'
+            && sameDocument(token.actor, actor)
+            && sameDocument(delta.parent, token)
+            && typeof delta.id === 'string' && delta.id) ids.add(delta.id)
+    }
+    return ids
+}
+
 /**
  * Accept one AP-value leaf in nested, flattened, or mixed dot-path notation.
- * Only optional root _stats and matching Actor _id metadata may accompany it.
+ * Only optional root _stats and matching Actor/owning ActorDelta _id metadata may accompany it.
  * Unknown fields, mismatched IDs, deletion operators, arrays, duplicate AP paths,
  * and nonnumeric values fail open.
  */
-function readOnlyApValue (changes, expectedActorId) {
+function readOnlyApValue (changes, expectedIds) {
     if (!isPlainRecord(changes)) return null
     let apValue = null
     let found = false
@@ -49,7 +66,7 @@ function readOnlyApValue (changes, expectedActorId) {
             const value = descriptor.value
             const path = prefix ? `${prefix}.${key}` : key
             if (path === '_id') {
-                if (typeof expectedActorId !== 'string' || !expectedActorId || value !== expectedActorId) return false
+                if (typeof value !== 'string' || !expectedIds.has(value)) return false
                 continue
             }
             if (path === '_stats') {
@@ -106,7 +123,7 @@ export function isManualApUpdate (actor, changes) {
         if (!uuid) return false
         const records = pendingWrites.get(uuid)
         if (!records?.size) return false
-        const update = readOnlyApValue(changes, actor.id)
+        const update = readOnlyApValue(changes, actorUpdateIds(actor))
         if (!update) return false
         return Array.from(records).some(record => record.owner === state && record.value === update.value)
     } catch {
